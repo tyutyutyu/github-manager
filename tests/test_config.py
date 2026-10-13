@@ -1,0 +1,56 @@
+from pathlib import Path
+
+import pytest
+
+from github_manager.config import ConfigError, load_config, parse_config
+from github_manager.rules import RenovatePreset, RequiredLines
+
+RULES = [
+    {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": [".env"]},
+    {"id": "rn", "type": "renovate_preset", "preset": "local>o/c"},
+]
+
+
+def test_repository_config_file_is_valid() -> None:
+    config = load_config(Path(__file__).parent.parent / "github-manager.toml")
+    assert config.owner == "tyutyutyu"
+    assert [type(rule) for rule in config.rules] == [RenovatePreset, RequiredLines]
+
+
+def test_defaults_apply(tmp_path: Path) -> None:
+    path = tmp_path / "rules.toml"
+    path.write_text(
+        'owner = "me"\nexclude = ["old-*"]\n'
+        '[[rules]]\nid = "gi"\ntype = "required_lines"\npath = ".gitignore"\nlines = [".env"]\n'
+    )
+    config = load_config(path)
+    assert config.exclude == ["old-*"]
+    assert config.branch == "github-manager/compliance"
+    assert not config.include_forks
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ({"rules": RULES}, "missing required key 'owner'"),
+        ({"owner": "me"}, "at least one"),
+        ({"owner": "me", "rules": RULES, "brnach": "x"}, "unknown keys: brnach"),
+        ({"owner": "me", "rules": RULES, "include_forks": "yes"}, "must be of type bool"),
+        ({"owner": "me", "rules": [*RULES, RULES[0]]}, "duplicate rule ids: gi"),
+        ({"owner": "me", "rules": ["x"]}, "must be a table"),
+        ({"owner": "me", "rules": [{"id": "x", "type": "nope"}]}, "rule x: unknown type 'nope'"),
+        ({"owner": "me", "rules": [{"id": "x", "type": "required_lines"}]}, "rule x: missing"),
+    ],
+)
+def test_invalid_config_is_rejected(raw, message) -> None:
+    with pytest.raises(ConfigError, match=message):
+        parse_config(raw, Path())
+
+
+def test_missing_and_malformed_files(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="not found"):
+        load_config(tmp_path / "absent.toml")
+    broken = tmp_path / "broken.toml"
+    broken.write_text("owner = ")
+    with pytest.raises(ConfigError, match="invalid TOML"):
+        load_config(broken)

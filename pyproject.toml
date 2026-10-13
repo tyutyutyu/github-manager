@@ -1,0 +1,66 @@
+[project]
+name = "github-manager"
+version = "0.1.0"
+description = "Validate and fix GitHub repositories against central rules via pull requests"
+readme = "README.md"
+authors = [
+    { name = "Földházi István", email = "istvan.foldhazi@gmail.com" }
+]
+requires-python = ">=3.15"
+dependencies = []
+
+[project.scripts]
+github-manager = "github_manager:main"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "deptry>=0.25.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+    "ty>=0.0.86",
+]
+
+[tool.pytest]
+minversion = "9.0"
+strict = true
+addopts = ["-ra", "--import-mode=importlib", "--cov", "--cov-report=term-missing"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source_pkgs = ["github_manager"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_also = [
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "PT", "RUF", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.deptry]
+# src layout: deptry does not detect the project package on its own.
+known_first_party = ["github_manager"]

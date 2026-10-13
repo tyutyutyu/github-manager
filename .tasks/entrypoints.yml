@@ -1,0 +1,15 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+# Stable root commands (`task verify`, `task version-bump -- <scope>`) used by
+# CI, documentation, and release workflows. No `desc`: they stay out of
+# `task --list`. Not `internal`: they must remain callable from the CLI.
+tasks:
+  verify:
+    cmds:
+      - task: dev:verify
+
+  version-bump:
+    cmds:
+      - task: dev:version-bump

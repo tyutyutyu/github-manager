@@ -1,0 +1,18 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+includes:
+  dev:
+    taskfile: ./.tasks/development.yml
+  repos:
+    taskfile: ./.tasks/business/repos.yml
+  entrypoints:
+    taskfile: ./.tasks/entrypoints.yml
+    flatten: true
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task --list

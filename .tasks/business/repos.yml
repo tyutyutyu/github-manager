@@ -1,0 +1,20 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+# Extra flags pass through, e.g. `task repos:check -- --diff -r my-repo`.
+tasks:
+  list:
+    desc: List the repositories the central rules apply to
+    cmds:
+      - uv run github-manager repos {{.CLI_ARGS}}
+
+  check:
+    desc: Report rule violations without changing anything
+    cmds:
+      - uv run github-manager check {{.CLI_ARGS}}
+
+  fix:
+    desc: Open or refresh one pull request per non-compliant repository
+    cmds:
+      - uv run github-manager fix {{.CLI_ARGS}}

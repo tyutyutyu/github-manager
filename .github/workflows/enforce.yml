@@ -1,0 +1,43 @@
+name: enforce
+
+# Applies the central rules to every repository of the owner.
+# Requires the GH_MANAGER_TOKEN secret: a fine-grained personal access token for
+# "All repositories" with Contents: read/write, Pull requests: read/write and
+# Metadata: read (add Workflows: read/write only if a rule edits .github/workflows).
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = report only, fix = open/refresh pull requests"
+        type: choice
+        options: [check, fix]
+        default: check
+      repo:
+        description: "Limit to one repository (optional)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Apply rules
+        env:
+          GH_TOKEN: ${{ secrets.GH_MANAGER_TOKEN }}
+          MODE: ${{ inputs.mode || 'fix' }}
+          REPO: ${{ inputs.repo }}
+        run: uv run --locked github-manager "$MODE" ${REPO:+--repo "$REPO"}

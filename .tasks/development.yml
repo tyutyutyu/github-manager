@@ -1,0 +1,65 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+# Development tasks deliberately have no `desc`; see the taskfile skill.
+tasks:
+  install:
+    preconditions:
+      - sh: command -v uv
+        msg: "uv is not installed: https://docs.astral.sh/uv/"
+    cmds:
+      - uv sync --locked --all-extras --all-groups
+
+  format:
+    cmds:
+      - uv run ruff format
+      - uv run ruff check --fix
+
+  format-check:
+    cmds:
+      - uv run ruff format --check
+
+  lint:
+    cmds:
+      - uv run ruff check
+
+  typecheck:
+    cmds:
+      - uv run ty check
+
+  deps-check:
+    cmds:
+      - uv run deptry .
+
+  test:
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  audit:
+    cmds:
+      - uv audit --locked --preview-features audit-command
+
+  build:
+    cmds:
+      - uv build --clear
+
+  verify:
+    cmds:
+      - task: install
+      - task: format-check
+      - task: lint
+      - task: typecheck
+      - task: deps-check
+      - task: test
+      - task: audit
+      - task: build
+
+  version-bump:
+    requires:
+      vars:
+        - name: CLI_ARGS
+          enum: [patch, minor, major]
+    cmds:
+      - uv version --bump {{.CLI_ARGS}}
+      - uv version --short

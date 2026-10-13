@@ -1,0 +1,40 @@
+# Central rules for the repositories of `owner`.
+# Archived repositories are always skipped; forks are skipped unless include_forks = true.
+# Patterns in `exclude` (global or per rule) are shell globs matched against the repo name.
+
+owner = "tyutyutyu"
+exclude = []
+include_forks = false
+
+# One pull request per repository, from this branch. It is regenerated on every run.
+branch = "github-manager/compliance"
+pr_title = "chore: align repository with central rules"
+commit_message = "chore: align repository with central rules"
+
+[[rules]]
+id = "renovate-preset"
+type = "renovate_preset"
+# Shared preset kept in this repository: renovate/default.json
+preset = "local>tyutyutyu/github-manager//renovate/default"
+# Already included by the preset, so they are dropped from repository configs.
+remove_extends = ["config:recommended", "config:base"]
+exclude = []
+
+[[rules]]
+id = "gitignore-baseline"
+type = "required_lines"
+path = ".gitignore"
+header = "# Required by github-manager"
+lines = [
+    ".DS_Store",
+    ".idea/",
+    ".env",
+]
+exclude = []
+
+# Example: keep a file identical to a template stored in this repository.
+# [[rules]]
+# id = "editorconfig"
+# type = "file_sync"
+# path = ".editorconfig"
+# source = "templates/editorconfig"
