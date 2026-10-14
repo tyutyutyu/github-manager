@@ -256,7 +256,6 @@ nohup.out
 
 # Custom additions
 .claude/settings.local.json
-.claude/autoharness/
 
 # Required by github-manager
 .DS_Store
@@ -264,3 +263,11 @@ nohup.out
 
 # Claude Code local state
 .claude/
+
+# >>> github-manager: gitignore-baseline
+.DS_Store
+.idea/
+.env
+.claude/
+!.claude/skills/
+# <<< github-manager: gitignore-baseline
