@@ -55,13 +55,17 @@ class RepoReport:
 class RemoteWorkspace:
     """Files of one commit, read lazily, with local writes layered on top."""
 
-    def __init__(self, api: GitHubApi, repo: str, sha: str) -> None:
+    def __init__(self, api: GitHubApi, repo: str, sha: str, default_branch: str) -> None:
         self._api = api
         self._repo = repo
         self._sha = sha
+        self.default_branch = default_branch
         self._paths = api.tree_paths(repo, sha)
         self._original: dict[str, str | None] = {}
         self._written: dict[str, str] = {}
+
+    def branch_exists(self, branch: str) -> bool:
+        return self._api.branch_sha(self._repo, branch) is not None
 
     def original(self, path: str) -> str | None:
         if path not in self._original:
@@ -90,22 +94,51 @@ class RemoteWorkspace:
         return "".join(difflib.unified_diff(before, after, f"a/{path}", f"b/{path}"))
 
 
-def select_repos(api: GitHubApi, config: Config, only: list[str]) -> list[Repo]:
-    repos = {repo.name: repo for repo in api.list_repos(config.owner)}
-    unknown = sorted(set(only) - set(repos))
-    if unknown:
-        raise GitHubError(f"unknown repositories for {config.owner}: {', '.join(unknown)}")
+def select_repos(
+    api: GitHubApi, config: Config, only: list[str], owners: list[str] | None = None
+) -> list[Repo]:
+    """Repositories in scope, across every configured owner.
+
+    `only` entries are `owner/name` or a bare `name` that must be unambiguous;
+    `owners` limits the run to some of the configured owners.
+    """
+    configured = {owner.lower(): owner for owner in config.owners}
+    unknown_owners = sorted({owner for owner in owners or [] if owner.lower() not in configured})
+    if unknown_owners:
+        raise GitHubError(f"owners not in the configuration: {', '.join(unknown_owners)}")
+    wanted = {owner.lower() for owner in owners} if owners else set(configured)
+    repos = [
+        repo for key, owner in configured.items() if key in wanted for repo in api.list_repos(owner)
+    ]
+
+    picked: set[str] = set()
+    for entry in only:
+        key = entry.lower()
+        field = "full_name" if "/" in key else "name"
+        matches = [repo.full_name for repo in repos if getattr(repo, field).lower() == key]
+        if not matches:
+            raise GitHubError(f"unknown repository: {entry}")
+        if len(matches) > 1:
+            raise GitHubError(f"ambiguous repository {entry}: {', '.join(sorted(matches))}")
+        picked.update(matches)
+
     selected = []
-    for name in sorted(repos, key=str.lower):
-        repo = repos[name]
-        if only and name not in only:
+    for repo in sorted(repos, key=lambda repo: repo.full_name.lower()):
+        if only and repo.full_name not in picked:
             continue
         if repo.archived or (repo.fork and not config.include_forks):
             continue
-        if any(fnmatchcase(name, pattern) for pattern in config.exclude):
+        if _excluded(repo, config.exclude):
             continue
         selected.append(repo)
     return selected
+
+
+def _excluded(repo: Repo, patterns: list[str]) -> bool:
+    return any(
+        fnmatchcase(repo.name, pattern) or fnmatchcase(repo.full_name, pattern)
+        for pattern in patterns
+    )
 
 
 def process_repo(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoReport:
@@ -120,10 +153,10 @@ def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoRe
     if base_sha is None:
         return RepoReport(repo.full_name, Outcome.SKIPPED, detail="empty repository")
 
-    workspace = RemoteWorkspace(api, repo.full_name, base_sha)
+    workspace = RemoteWorkspace(api, repo.full_name, base_sha, repo.default_branch)
     findings: list[Finding] = []
     for rule in config.rules:
-        if rule.applies_to(repo.name):
+        if rule.applies_to(repo.name, repo.full_name):
             findings.extend(rule.apply(workspace))
     changes = workspace.changes()
     report = RepoReport(

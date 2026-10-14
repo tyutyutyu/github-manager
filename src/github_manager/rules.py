@@ -16,6 +16,11 @@ from typing import Any, ClassVar, Protocol, Self
 
 
 class Workspace(Protocol):
+    @property
+    def default_branch(self) -> str: ...
+
+    def branch_exists(self, branch: str) -> bool: ...
+
     def read(self, path: str) -> str | None: ...
 
     def write(self, path: str, content: str) -> None: ...
@@ -74,8 +79,9 @@ class Rule(ABC):
     id: str
     exclude: list[str] = field(default_factory=list)
 
-    def applies_to(self, repo_name: str) -> bool:
-        return not any(fnmatchcase(repo_name, pattern) for pattern in self.exclude)
+    def applies_to(self, repo_name: str, full_name: str | None = None) -> bool:
+        names = [repo_name] if full_name is None else [repo_name, full_name]
+        return not any(fnmatchcase(name, pattern) for pattern in self.exclude for name in names)
 
     @abstractmethod
     def apply(self, workspace: Workspace) -> list[Finding]:
@@ -100,13 +106,19 @@ class Rule(ABC):
 
 @dataclass(frozen=True, kw_only=True)
 class RequiredLines(Rule):
-    """Every listed line must be present in the file; missing ones are appended."""
+    """The file must contain a managed block, delimited by marker comments, holding `lines`.
+
+    The block is replaced as a whole on every fix, so changing `lines` in the
+    central config updates every repository. Lines in `remove_lines` are deleted
+    from the rest of the file.
+    """
 
     type_name: ClassVar[str] = "required_lines"
 
     path: str
     lines: list[str]
-    header: str | None = None
+    remove_lines: list[str] = field(default_factory=list)
+    comment: str = "#"
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
@@ -116,23 +128,54 @@ class RequiredLines(Rule):
         return cls(
             path=options.text("path", REQUIRED),
             lines=lines,
-            header=options.text("header"),
+            remove_lines=options.text_list("remove_lines", []),
+            comment=options.text("comment", "#"),
             **common,
         )
 
+    @property
+    def begin_marker(self) -> str:
+        return f"{self.comment} >>> github-manager: {self.id}"
+
+    @property
+    def end_marker(self) -> str:
+        return f"{self.comment} <<< github-manager: {self.id}"
+
     def apply(self, workspace: Workspace) -> list[Finding]:
         content = workspace.read(self.path) or ""
-        present = {line.strip() for line in content.splitlines()}
-        missing = [line for line in self.lines if line.strip() not in present]
-        if not missing:
+        current = content.splitlines()
+        stripped = [line.strip() for line in current]
+        begins = [i for i, line in enumerate(stripped) if line == self.begin_marker]
+        ends = [i for i, line in enumerate(stripped) if line == self.end_marker]
+        if len(begins) > 1 or len(ends) > 1 or len(begins) != len(ends) or begins > ends:
+            message = f"{self.path}: malformed managed block markers"
+            return [Finding(self.id, message, fixable=False)]
+
+        block = [self.begin_marker, *self.lines, self.end_marker]
+        unwanted = {line.strip() for line in self.remove_lines}
+        if begins:
+            before, after = current[: begins[0]], current[ends[0] + 1 :]
+        else:
+            before, after = current, []
+        before = [line for line in before if line.strip() not in unwanted]
+        after = [line for line in after if line.strip() not in unwanted]
+        removed = [line for line in current if line.strip() in unwanted]
+        if not begins and before and before[-1].strip():
+            before.append("")
+        result = "\n".join([*before, *block, *after]) + "\n"
+        if result == content:
             return []
 
-        block = [self.header] if self.header and self.header.strip() not in present else []
-        block += missing
-        prefix = content if not content or content.endswith("\n") else content + "\n"
-        separator = "\n" if prefix else ""
-        workspace.write(self.path, prefix + separator + "\n".join(block) + "\n")
-        return [Finding(self.id, f"{self.path}: missing lines: {', '.join(missing)}")]
+        workspace.write(self.path, result)
+        changes = []
+        if not begins:
+            changes.append("managed block is missing")
+        elif current[begins[0] : ends[0] + 1] != block:
+            changes.append("managed block is outdated")
+        if removed:
+            changes.append(f"unwanted lines: {', '.join(line.strip() for line in removed)}")
+        summary = "; ".join(changes) or "missing final newline"
+        return [Finding(self.id, f"{self.path}: {summary}")]
 
 
 RENOVATE_CONFIG_FILES = (
@@ -266,6 +309,41 @@ class FileSync(Rule):
         return [Finding(self.id, f"{self.path}: {state}")]
 
 
+@dataclass(frozen=True, kw_only=True)
+class BranchStrategy(Rule):
+    """The default branch must be `default_branch` and no `forbidden_branches` may exist.
+
+    Branches are repository settings, not files, so findings need manual action.
+    """
+
+    type_name: ClassVar[str] = "branch_strategy"
+
+    default_branch: str = "main"
+    forbidden_branches: list[str] = field(default_factory=lambda: ["develop"])
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        return cls(
+            default_branch=options.text("default_branch", "main"),
+            forbidden_branches=options.text_list("forbidden_branches", ["develop"]),
+            **common,
+        )
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        findings = []
+        if workspace.default_branch != self.default_branch:
+            message = (
+                f"default branch is {workspace.default_branch!r}, expected {self.default_branch!r}"
+            )
+            findings.append(Finding(self.id, message, fixable=False))
+        findings.extend(
+            Finding(self.id, f"forbidden branch exists: {branch}", fixable=False)
+            for branch in self.forbidden_branches
+            if workspace.branch_exists(branch)
+        )
+        return findings
+
+
 RULE_TYPES: dict[str, type[Rule]] = {
-    rule.type_name: rule for rule in (RequiredLines, RenovatePreset, FileSync)
+    rule.type_name: rule for rule in (RequiredLines, RenovatePreset, FileSync, BranchStrategy)
 }

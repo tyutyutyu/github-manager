@@ -35,10 +35,22 @@ def build_parser() -> argparse.ArgumentParser:
     check = commands.add_parser("check", help="report rule violations; changes nothing")
     check.add_argument("--diff", action="store_true", help="show the changes a fix would make")
     fix = commands.add_parser("fix", help="open or refresh one pull request per repository")
-    commands.add_parser("repos", help="list the repositories the rules apply to")
+    repos = commands.add_parser("repos", help="list the repositories the rules apply to")
+    for command in (check, fix, repos):
+        command.add_argument(
+            "-o",
+            "--owner",
+            action="append",
+            default=[],
+            help="limit to a configured owner (repeatable)",
+        )
     for command in (check, fix):
         command.add_argument(
-            "-r", "--repo", action="append", default=[], help="limit to a repository (repeatable)"
+            "-r",
+            "--repo",
+            action="append",
+            default=[],
+            help="limit to a repository: OWNER/NAME, or NAME if unambiguous (repeatable)",
         )
     return parser
 
@@ -48,7 +60,7 @@ def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_a
     try:
         config = load_config(args.config)
         api = api_factory()
-        repos = select_repos(api, config, getattr(args, "repo", []))
+        repos = select_repos(api, config, getattr(args, "repo", []), args.owner)
     except (ConfigError, GitHubError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR

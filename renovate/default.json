@@ -3,6 +3,7 @@
   "description": "Shared Renovate preset for tyutyutyu repositories (managed by github-manager)",
   "extends": ["config:recommended"],
   "configMigration": true,
+  "rangeStrategy": "pin",
   "packageRules": [
     {
       "description": "Automerge non-major updates",

@@ -17,7 +17,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    owner: str
+    owners: list[str]
     rules: Sequence[Rule]
     exclude: list[str] = field(default_factory=list)
     include_forks: bool = False
@@ -47,11 +47,11 @@ def parse_config(raw: dict[str, Any], base_dir: Path) -> Config:
     if duplicates:
         raise ConfigError(f"duplicate rule ids: {', '.join(duplicates)}")
 
-    defaults = Config(owner="", rules=[])
+    defaults = Config(owners=[], rules=[])
     options = Options(settings)
     try:
         config = Config(
-            owner=options.text("owner", REQUIRED),
+            owners=_owners(options.text_list("owners", REQUIRED)),
             rules=rules,
             exclude=options.text_list("exclude", []),
             include_forks=options.flag("include_forks", defaults.include_forks),
@@ -63,6 +63,16 @@ def parse_config(raw: dict[str, Any], base_dir: Path) -> Config:
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
     return config
+
+
+def _owners(owners: list[str]) -> list[str]:
+    if not owners:
+        raise ValueError("'owners' must not be empty")
+    lowered = [owner.lower() for owner in owners]
+    duplicates = sorted({owner for owner in lowered if lowered.count(owner) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate owners: {', '.join(duplicates)}")
+    return owners
 
 
 def _parse_rule(entry: Any, base_dir: Path) -> Rule:

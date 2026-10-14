@@ -5,12 +5,12 @@ import pytest
 from github_manager.config import Config
 from github_manager.engine import Outcome, process_repo, select_repos
 from github_manager.github import GitHubError
-from github_manager.rules import RenovatePreset, RequiredLines
+from github_manager.rules import BranchStrategy, RenovatePreset, RequiredLines
 
 RULE = RequiredLines.from_options(
     {"id": "gi", "path": ".gitignore", "lines": [".env"], "exclude": ["skip-rule"]}, Path()
 )
-CONFIG = Config(owner="owner", rules=[RULE], exclude=["legacy-*"])
+CONFIG = Config(owners=["owner"], rules=[RULE], exclude=["legacy-*"])
 
 
 def repo_named(api, name):
@@ -25,8 +25,36 @@ def test_select_repos_filters_and_sorts(fake_github) -> None:
 
     assert [repo.name for repo in select_repos(fake_github, CONFIG, [])] == ["A", "b"]
     assert [repo.name for repo in select_repos(fake_github, CONFIG, ["b"])] == ["b"]
-    with pytest.raises(GitHubError, match="unknown repositories for owner: zzz"):
+    with pytest.raises(GitHubError, match="unknown repository: zzz"):
         select_repos(fake_github, CONFIG, ["zzz"])
+
+
+def test_select_repos_spans_owners(fake_github) -> None:
+    config = Config(owners=["owner", "org"], rules=[RULE], exclude=["org/legacy-*"])
+    fake_github.add_repo("app", {})
+    fake_github.add_repo("app", {}, owner="org")
+    fake_github.add_repo("tool", {}, owner="org")
+    fake_github.add_repo("legacy-x", {}, owner="org")
+    fake_github.add_repo("stranger", {}, owner="other")
+
+    def names(only, owners=None):
+        return [repo.full_name for repo in select_repos(fake_github, config, only, owners)]
+
+    assert names([]) == ["org/app", "org/tool", "owner/app"]
+    assert names([], ["ORG"]) == ["org/app", "org/tool"]
+    assert names(["tool", "Owner/App"]) == ["org/tool", "owner/app"]
+    with pytest.raises(GitHubError, match="ambiguous repository app: org/app, owner/app"):
+        names(["app"])
+    with pytest.raises(GitHubError, match="owners not in the configuration: other"):
+        names([], ["other"])
+
+
+def test_rule_exclude_matches_full_name() -> None:
+    rule = RequiredLines.from_options(
+        {"id": "x", "path": "p", "lines": ["a"], "exclude": ["org/*"]}, Path()
+    )
+    assert not rule.applies_to("app", "org/app")
+    assert rule.applies_to("app", "owner/app")
 
 
 def test_check_reports_without_writing(fake_github) -> None:
@@ -39,7 +67,9 @@ def test_check_reports_without_writing(fake_github) -> None:
 
 
 def test_compliant_and_excluded_and_empty_repositories(fake_github) -> None:
-    fake_github.add_repo("ok", {".gitignore": ".env\n"})
+    fake_github.add_repo(
+        "ok", {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"}
+    )
     fake_github.add_repo("skip-rule", {})
     fake_github.add_repo("empty", None)
 
@@ -56,7 +86,10 @@ def test_fix_lifecycle(fake_github) -> None:
 
     first = process_repo(fake_github, CONFIG, repo, fix=True)
     assert first.outcome is Outcome.PR_CREATED
-    assert fake_github.files_at(name, CONFIG.branch)[".gitignore"] == "dist/\n\n.env\n"
+    assert (
+        fake_github.files_at(name, CONFIG.branch)[".gitignore"]
+        == "dist/\n\n# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"
+    )
 
     fake_github.calls.clear()
     second = process_repo(fake_github, CONFIG, repo, fix=True)
@@ -68,10 +101,16 @@ def test_fix_lifecycle(fake_github) -> None:
     fake_github.repos[name].branches["develop"] = "base2"
     third = process_repo(fake_github, CONFIG, repo, fix=True)
     assert third.outcome is Outcome.PR_UPDATED
-    assert fake_github.files_at(name, CONFIG.branch)[".gitignore"] == "build/\n\n.env\n"
+    assert (
+        fake_github.files_at(name, CONFIG.branch)[".gitignore"]
+        == "build/\n\n# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"
+    )
 
     # Someone fixes the default branch by hand: the pull request becomes obsolete.
-    fake_github.repos[name].commits["base3"] = ("base2", {".gitignore": ".env\n"})
+    fake_github.repos[name].commits["base3"] = (
+        "base2",
+        {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"},
+    )
     fake_github.repos[name].branches["develop"] = "base3"
     fourth = process_repo(fake_github, CONFIG, repo, fix=True)
     assert fourth.outcome is Outcome.PR_CLOSED
@@ -88,12 +127,12 @@ def test_stale_branch_without_pull_request_is_reused(fake_github) -> None:
 
 def test_pull_request_body_lists_manual_findings(fake_github) -> None:
     rules = [RULE, RenovatePreset.from_options({"id": "rn", "preset": "local>o/c"}, Path())]
-    config = Config(owner="owner", rules=rules)
+    config = Config(owners=["owner"], rules=rules)
     name = fake_github.add_repo("app", {"renovate.json": "{broken"})
     process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
 
     _, body, _ = fake_github.pulls[name][1]
-    assert "- gi: .gitignore: missing lines: .env" in body
+    assert "- gi: .gitignore: managed block is missing" in body
     assert "### Needs manual action\n- rn: renovate.json: invalid JSON" in body
 
 
@@ -101,7 +140,24 @@ def test_api_errors_are_reported_per_repository(fake_github) -> None:
     rule = RequiredLines.from_options({"id": "x", "path": "broken", "lines": ["a"]}, Path())
     fake_github.add_repo("app", {"broken": ""})
     report = process_repo(
-        fake_github, Config(owner="owner", rules=[rule]), repo_named(fake_github, "app"), fix=False
+        fake_github,
+        Config(owners=["owner"], rules=[rule]),
+        repo_named(fake_github, "app"),
+        fix=False,
     )
     assert report.outcome is Outcome.ERROR
     assert report.detail == "boom"
+
+
+def test_branch_strategy_sees_repository_branches(fake_github) -> None:
+    rule = BranchStrategy.from_options({"id": "bs"}, Path())
+    config = Config(owners=["owner"], rules=[rule])
+    name = fake_github.add_repo("app", {}, default_branch="master")
+    fake_github.repos[name].branches["develop"] = "base"
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+    assert report.outcome is Outcome.NEEDS_FIX
+    assert [finding.message for finding in report.manual_findings] == [
+        "default branch is 'master', expected 'main'",
+        "forbidden branch exists: develop",
+    ]

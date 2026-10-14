@@ -1,13 +1,69 @@
-# Central rules for the repositories of `owner`.
+# Central rules for the repositories of every account in `owners` (users or organizations).
 # Archived repositories are always skipped; forks are skipped unless include_forks = true.
-# Patterns in `exclude` (global or per rule) are shell globs matched against the repo name.
+# Patterns in `exclude` (global or per rule) are shell globs matched against the repo
+# name and against OWNER/NAME (e.g. "tyutyutyu-org/legacy-*").
 
-owner = "tyutyutyu"
-exclude = []
+owners = ["tyutyutyu", "tyutyutyu-org"]
+exclude = [
+    "tyutyutyu-org/brand-site-blog",
+    "tyutyutyu-org/brand-site-data",
+    "tyutyutyu-org/brand-site-ui",
+    "tyutyutyu-org/daily-loop",
+    "tyutyutyu-org/easy-github",
+    "tyutyutyu-org/github-copilot-price-monitor",
+    "tyutyutyu-org/knowledge-miner",
+    "tyutyutyu-org/proxy-manager",
+    "tyutyutyu-org/tyutyutyu-bridge",
+    "tyutyutyu-org/tyutyutyu-coding-agent",
+    "tyutyutyu-org/update-notifier",
+    "tyutyutyu-org/youtube-mirror",
+    "tyutyutyu/agent-skills",
+    "tyutyutyu/apple__site-finder",
+    "tyutyutyu/battery-tracker-app",
+    "tyutyutyu/bedrock-server-map",
+    "tyutyutyu/devops",
+    "tyutyutyu/docker-image-stats",
+    "tyutyutyu/dodu",
+    "tyutyutyu/dotfiles",
+    "tyutyutyu/finance_assistant",
+    "tyutyutyu/github-manager",
+    "tyutyutyu/home-server-management",
+    "tyutyutyu/i3-config",
+    "tyutyutyu/image-viewer",
+    "tyutyutyu/java-feeds",
+    "tyutyutyu/java-web-frameworks",
+    "tyutyutyu/just-enough-quota-bar",
+    "tyutyutyu/maven-mcp",
+    "tyutyutyu/mese-app",
+    "tyutyutyu/mese-doboz",
+    "tyutyutyu/msps",
+    "tyutyutyu/news-indexer-page-parsers",
+    "tyutyutyu/pdf-titan",
+    "tyutyutyu/photo-backup",
+    "tyutyutyu/py-tyu",
+    "tyutyutyu/release-notes-news",
+    "tyutyutyu/relevant-tools",
+    "tyutyutyu/sample-app-minimal",
+    "tyutyutyu/task-center",
+    "tyutyutyu/tyutyutyu",
+    "tyutyutyu/tyutyutyu-backup",
+    "tyutyutyu/tyutyutyu-dashboard",
+    "tyutyutyu/tyutyutyu-dashboard-extension",
+    "tyutyutyu/tyutyutyu-ecosystem",
+    "tyutyutyu/tyutyutyu-gcp-personal",
+    "tyutyutyu/valiant-bridge",
+    "tyutyutyu/video-converter",
+    "tyutyutyu/video-converter-cluster",
+    "tyutyutyu/yt-dlp-meta",
+    "tyutyutyu/zenfocus",
+    "tyutyutyu/zenget",
+    "tyutyutyu/zenget-backlog",
+    "tyutyutyu/zenget-registry",
+]
 include_forks = false
 
 # One pull request per repository, from this branch. It is regenerated on every run.
-branch = "github-manager/compliance"
+branch = "feature/github-manager-compliance"
 pr_title = "chore: align repository with central rules"
 commit_message = "chore: align repository with central rules"
 
@@ -24,12 +80,27 @@ exclude = []
 id = "gitignore-baseline"
 type = "required_lines"
 path = ".gitignore"
-header = "# Required by github-manager"
+# Managed block between "# >>> github-manager: gitignore-baseline" and
+# "# <<< github-manager: gitignore-baseline"; it is replaced as a whole.
 lines = [
     ".DS_Store",
     ".idea/",
     ".env",
+    ".claude/",
+    "!.claude/skills/",
 ]
+# Deleted from the rest of the file.
+remove_lines = [
+    ".claude/autoharness/",
+]
+exclude = []
+
+[[rules]]
+id = "branch-strategy"
+type = "branch_strategy"
+# Branches are repository settings: violations are reported, not fixed.
+default_branch = "main"
+forbidden_branches = ["develop"]
 exclude = []
 
 # Example: keep a file identical to a template stored in this repository.
