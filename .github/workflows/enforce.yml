@@ -58,4 +58,4 @@ jobs:
             echo "Skipping: $REPO is not in $OWNER"
             exit 0
           fi
-          uv run --locked github-manager "$MODE" --owner "$OWNER" ${REPO:+--repo "$REPO"}
+          uv run --locked --no-build github-manager "$MODE" --owner "$OWNER" ${REPO:+--repo "$REPO"}

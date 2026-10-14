@@ -111,6 +111,17 @@ def select_repos(
         repo for key, owner in configured.items() if key in wanted for repo in api.list_repos(owner)
     ]
 
+    picked = _pick_repos(repos, only)
+    return [
+        repo
+        for repo in sorted(repos, key=lambda repo: repo.full_name.lower())
+        if (not only or repo.full_name in picked)
+        and not (repo.archived or (repo.fork and not config.include_forks))
+        and not _excluded(repo, config.exclude)
+    ]
+
+
+def _pick_repos(repos: list[Repo], only: list[str]) -> set[str]:
     picked: set[str] = set()
     for entry in only:
         key = entry.lower()
@@ -121,17 +132,7 @@ def select_repos(
         if len(matches) > 1:
             raise GitHubError(f"ambiguous repository {entry}: {', '.join(sorted(matches))}")
         picked.update(matches)
-
-    selected = []
-    for repo in sorted(repos, key=lambda repo: repo.full_name.lower()):
-        if only and repo.full_name not in picked:
-            continue
-        if repo.archived or (repo.fork and not config.include_forks):
-            continue
-        if _excluded(repo, config.exclude):
-            continue
-        selected.append(repo)
-    return selected
+    return picked
 
 
 def _excluded(repo: Repo, patterns: list[str]) -> bool:
