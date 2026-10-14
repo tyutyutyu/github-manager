@@ -1,10 +1,13 @@
-"""Evaluate rules against repositories and turn fixes into one pull request per repository."""
+"""Evaluate rules against repositories and turn fixes into one pull request per repository.
+
+Setting fixes are not files: they are applied to the repository directly.
+"""
 
 import difflib
 from dataclasses import dataclass, field
 from enum import StrEnum
 from fnmatch import fnmatchcase
-from typing import Protocol
+from typing import Any, Protocol
 
 from github_manager.config import Config
 from github_manager.github import GitHubError, PullRequest, Repo
@@ -26,6 +29,8 @@ class GitHubApi(Protocol):
     def create_pr(self, repo: str, base: str, head: str, title: str, body: str) -> PullRequest: ...
     def update_pr(self, repo: str, number: int, title: str, body: str) -> None: ...
     def close_pr(self, repo: str, number: int, comment: str) -> None: ...
+    def repo_settings(self, repo: str) -> dict[str, Any]: ...
+    def update_repo_settings(self, repo: str, settings: dict[str, Any]) -> None: ...
 
 
 class Outcome(StrEnum):
@@ -36,6 +41,7 @@ class Outcome(StrEnum):
     PR_UPDATED = "pull request updated"
     PR_UP_TO_DATE = "pull request up to date"
     PR_CLOSED = "obsolete pull request closed"
+    SETTINGS_UPDATED = "settings updated"
     ERROR = "error"
 
 
@@ -53,7 +59,8 @@ class RepoReport:
 
 
 class RemoteWorkspace:
-    """Files of one commit, read lazily, with local writes layered on top."""
+    """Files of one commit and the repository settings, read lazily, with local
+    changes layered on top."""
 
     def __init__(self, api: GitHubApi, repo: str, sha: str, default_branch: str) -> None:
         self._api = api
@@ -63,6 +70,8 @@ class RemoteWorkspace:
         self._paths = api.tree_paths(repo, sha)
         self._original: dict[str, str | None] = {}
         self._written: dict[str, str] = {}
+        self._settings: dict[str, Any] | None = None
+        self._changed_settings: dict[str, Any] = {}
 
     def branch_exists(self, branch: str) -> bool:
         return self._api.branch_sha(self._repo, branch) is not None
@@ -80,6 +89,24 @@ class RemoteWorkspace:
 
     def write(self, path: str, content: str) -> None:
         self._written[path] = content
+
+    def setting(self, name: str) -> Any:
+        if name in self._changed_settings:
+            return self._changed_settings[name]
+        if self._settings is None:
+            self._settings = self._api.repo_settings(self._repo)
+        return self._settings.get(name)
+
+    def change_setting(self, name: str, value: Any) -> None:
+        self._changed_settings[name] = value
+
+    def setting_changes(self) -> dict[str, Any]:
+        current = self._settings or {}
+        return {
+            name: value
+            for name, value in sorted(self._changed_settings.items())
+            if current.get(name) != value
+        }
 
     def changes(self) -> dict[str, str]:
         return {
@@ -170,6 +197,11 @@ def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoRe
         report.outcome, report.detail = _sync_pull_request(
             api, config, repo, base_sha, report, changes
         )
+        settings = workspace.setting_changes()
+        if settings:
+            api.update_repo_settings(repo.full_name, settings)
+            if report.outcome is Outcome.NEEDS_FIX:
+                report.outcome = Outcome.SETTINGS_UPDATED
     return report
 
 
@@ -203,7 +235,8 @@ def _sync_pull_request(
         return Outcome.PR_UP_TO_DATE, pull.url
 
     api.reset_branch(name, branch, base_sha, exists=branch_sha is not None)
-    message = f"{config.commit_message}\n\n" + "\n".join(_finding_lines(report.findings))
+    file_findings = [finding for finding in report.findings if not finding.setting]
+    message = f"{config.commit_message}\n\n" + "\n".join(_finding_lines(file_findings))
     api.commit_files(name, branch, base_sha, message, changes)
     if pull is not None:
         api.update_pr(name, pull.number, config.pr_title, body)
@@ -227,7 +260,8 @@ def _finding_lines(findings: list[Finding]) -> list[str]:
 
 
 def _pr_body(report: RepoReport) -> str:
-    fixed = [finding for finding in report.findings if finding.fixable]
+    fixed = [finding for finding in report.findings if finding.fixable and not finding.setting]
+    settings = [finding for finding in report.findings if finding.setting]
     lines = [
         "This pull request was opened by **github-manager** to align the repository "
         "with the central rules.",
@@ -235,6 +269,8 @@ def _pr_body(report: RepoReport) -> str:
         "### Fixed",
         *_finding_lines(fixed),
     ]
+    if settings:
+        lines += ["", "### Repository settings (applied directly)", *_finding_lines(settings)]
     if report.manual_findings:
         lines += ["", "### Needs manual action", *_finding_lines(report.manual_findings)]
     lines += ["", "_The branch is regenerated on every run; do not push to it by hand._"]

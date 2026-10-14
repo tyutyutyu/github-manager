@@ -16,23 +16,18 @@ exclude = [
     "tyutyutyu-org/tyutyutyu-bridge",
     "tyutyutyu-org/tyutyutyu-coding-agent",
     "tyutyutyu-org/update-notifier",
-    "tyutyutyu-org/youtube-mirror",
-    "tyutyutyu/agent-skills",
     "tyutyutyu/apple__site-finder",
     "tyutyutyu/battery-tracker-app",
     "tyutyutyu/bedrock-server-map",
     "tyutyutyu/devops",
     "tyutyutyu/docker-image-stats",
     "tyutyutyu/dodu",
-    "tyutyutyu/dotfiles",
     "tyutyutyu/finance_assistant",
-    "tyutyutyu/github-manager",
     "tyutyutyu/home-server-management",
     "tyutyutyu/i3-config",
     "tyutyutyu/image-viewer",
     "tyutyutyu/java-feeds",
     "tyutyutyu/java-web-frameworks",
-    "tyutyutyu/just-enough-quota-bar",
     "tyutyutyu/maven-mcp",
     "tyutyutyu/mese-app",
     "tyutyutyu/mese-doboz",
@@ -101,6 +96,14 @@ type = "branch_strategy"
 # Branches are repository settings: violations are reported, not fixed.
 default_branch = "main"
 forbidden_branches = ["develop"]
+exclude = []
+
+[[rules]]
+id = "repo-settings"
+type = "repo_settings"
+# Repository settings: applied directly through the GitHub API (PyGithub), not by pull
+# request. Needs a token with Administration: read/write.
+settings = { delete_branch_on_merge = true }
 exclude = []
 
 # Example: keep a file identical to a template stored in this repository.

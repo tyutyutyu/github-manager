@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from github_manager.config import ConfigError, load_config, parse_config
-from github_manager.rules import BranchStrategy, RenovatePreset, RequiredLines
+from github_manager.rules import BranchStrategy, RenovatePreset, RepoSettings, RequiredLines
 
 RULES = [
     {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": [".env"]},
@@ -14,7 +14,12 @@ RULES = [
 def test_repository_config_file_is_valid() -> None:
     config = load_config(Path(__file__).parent.parent / "github-manager.toml")
     assert config.owners == ["tyutyutyu", "tyutyutyu-org"]
-    assert [type(rule) for rule in config.rules] == [RenovatePreset, RequiredLines, BranchStrategy]
+    assert [type(rule) for rule in config.rules] == [
+        RenovatePreset,
+        RequiredLines,
+        BranchStrategy,
+        RepoSettings,
+    ]
 
 
 def test_defaults_apply(tmp_path: Path) -> None:

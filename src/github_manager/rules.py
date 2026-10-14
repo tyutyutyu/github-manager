@@ -1,8 +1,8 @@
 """Rule types. A rule inspects a repository workspace and writes the fixes it needs.
 
 Rules never talk to GitHub directly: they read and write through a `Workspace`,
-so the same code serves `check` (changes are discarded) and `fix` (changes are
-committed to a pull request).
+so the same code serves `check` (changes are discarded) and `fix` (file changes are
+committed to a pull request, setting changes are applied to the repository).
 """
 
 import contextlib
@@ -25,12 +25,18 @@ class Workspace(Protocol):
 
     def write(self, path: str, content: str) -> None: ...
 
+    def setting(self, name: str) -> Any: ...
+
+    def change_setting(self, name: str, value: Any) -> None: ...
+
 
 @dataclass(frozen=True)
 class Finding:
     rule_id: str
     message: str
     fixable: bool = True
+    # Fixed through the repository settings, not through the pull request.
+    setting: bool = False
 
 
 REQUIRED = object()
@@ -66,6 +72,9 @@ class Options:
 
     def flag(self, key: str, default: bool) -> bool:
         return self._take(key, bool, default)
+
+    def table(self, key: str, default: Any = None) -> dict[str, Any]:
+        return dict(self._take(key, dict, default))
 
     def finish(self) -> None:
         if self._raw:
@@ -344,6 +353,67 @@ class BranchStrategy(Rule):
         return findings
 
 
+# Boolean repository settings accepted by PyGithub's `Repository.edit`.
+REPO_BOOL_SETTINGS = frozenset(
+    {
+        "allow_auto_merge",
+        "allow_forking",
+        "allow_merge_commit",
+        "allow_rebase_merge",
+        "allow_squash_merge",
+        "allow_update_branch",
+        "delete_branch_on_merge",
+        "has_discussions",
+        "has_issues",
+        "has_projects",
+        "has_wiki",
+        "use_squash_pr_title_as_default",
+        "web_commit_signoff_required",
+    }
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class RepoSettings(Rule):
+    """The repository settings must have the values in `settings`.
+
+    Fixes are applied to the repository directly (through PyGithub), not by pull request.
+    """
+
+    type_name: ClassVar[str] = "repo_settings"
+
+    settings: dict[str, bool]
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        settings = options.table("settings", REQUIRED)
+        if not settings:
+            raise ValueError("'settings' must not be empty")
+        unknown = sorted(set(settings) - REPO_BOOL_SETTINGS)
+        if unknown:
+            raise ValueError(f"unknown settings: {', '.join(unknown)}")
+        not_bool = sorted(name for name, value in settings.items() if not isinstance(value, bool))
+        if not_bool:
+            raise ValueError(f"settings must be true or false: {', '.join(not_bool)}")
+        return cls(settings=settings, **common)
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        findings = []
+        for name, wanted in self.settings.items():
+            current = workspace.setting(name)
+            if current == wanted:
+                continue
+            if current is None:
+                message = f"setting {name} is not readable (the token needs Administration access)"
+                findings.append(Finding(self.id, message, fixable=False))
+                continue
+            workspace.change_setting(name, wanted)
+            message = f"setting {name} is {json.dumps(current)}, expected {json.dumps(wanted)}"
+            findings.append(Finding(self.id, message, setting=True))
+        return findings
+
+
 RULE_TYPES: dict[str, type[Rule]] = {
-    rule.type_name: rule for rule in (RequiredLines, RenovatePreset, FileSync, BranchStrategy)
+    rule.type_name: rule
+    for rule in (RequiredLines, RenovatePreset, FileSync, BranchStrategy, RepoSettings)
 }

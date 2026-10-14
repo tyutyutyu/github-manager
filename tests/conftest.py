@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -11,6 +12,7 @@ class FakeRepo:
     branches: dict[str, str] = field(default_factory=dict)
     # commit sha -> (parent sha, files)
     commits: dict[str, tuple[str | None, dict[str, str]]] = field(default_factory=dict)
+    settings: dict[str, Any] = field(default_factory=dict)
 
 
 class FakeGitHub:
@@ -33,9 +35,10 @@ class FakeGitHub:
         fork: bool = False,
         default_branch: str = "main",
         owner: str = "owner",
+        settings: dict[str, Any] | None = None,
     ) -> str:
         full = f"{owner}/{name}"
-        repo = FakeRepo(Repo(name, full, default_branch, archived, fork))
+        repo = FakeRepo(Repo(name, full, default_branch, archived, fork), settings=settings or {})
         if files is not None:
             repo.commits["base"] = (None, dict(files))
             repo.branches[default_branch] = "base"
@@ -126,6 +129,13 @@ class FakeGitHub:
         self.pulls[repo][number] = (head, body, False)
         self.calls.append("close pr")
 
+    def repo_settings(self, repo: str) -> dict[str, Any]:
+        return dict(self.repos[repo].settings)
+
+    def update_repo_settings(self, repo: str, settings: dict[str, Any]) -> None:
+        self.repos[repo].settings.update(settings)
+        self.calls.append(f"settings {sorted(settings)}")
+
 
 class MemoryWorkspace:
     def __init__(
@@ -134,8 +144,10 @@ class MemoryWorkspace:
         *,
         default_branch: str = "main",
         branches: set[str] | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> None:
         self.files = dict(files or {})
+        self.settings = dict(settings or {})
         self.default_branch = default_branch
         self.branches = {default_branch} if branches is None else branches
 
@@ -147,6 +159,12 @@ class MemoryWorkspace:
 
     def write(self, path: str, content: str) -> None:
         self.files[path] = content
+
+    def setting(self, name: str) -> Any:
+        return self.settings.get(name)
+
+    def change_setting(self, name: str, value: Any) -> None:
+        self.settings[name] = value
 
 
 @pytest.fixture
