@@ -1,6 +1,7 @@
 # github-manager
 
-Validates GitHub repositories against central rules and fixes them through pull requests.
+Validates the GitHub repositories of several owners (users and organizations, listed in
+`owners`) against central rules and fixes them through pull requests.
 
 - Rules live in [github-manager.toml](github-manager.toml); the shared Renovate preset in
   [renovate/default.json](renovate/default.json).
@@ -18,7 +19,8 @@ Validates GitHub repositories against central rules and fixes them through pull 
 task                                     # list business tasks
 task repos:list                          # repositories in scope
 task repos:check -- --diff               # report violations and show planned changes
-task repos:check -- -r my-repo           # one repository only
+task repos:check -- -r owner/my-repo     # one repository (bare name if unambiguous)
+task repos:check -- -o tyutyutyu-org     # one owner only
 task repos:fix                           # open or refresh pull requests
 ```
 
@@ -31,9 +33,10 @@ Exit codes: `0` compliant (or every finding has a pull request), `1` findings re
 
 | Type | Checks | Fix |
 | --- | --- | --- |
-| `required_lines` | every line in `lines` is present in `path` | appends the missing lines (after an optional `header`) |
+| `required_lines` | `path` has a managed block (between `# >>> github-manager: <id>` and `# <<< github-manager: <id>`, comment prefix set by `comment`) holding exactly `lines`, and no line from `remove_lines` | replaces or appends the block, deletes the `remove_lines` |
 | `renovate_preset` | the Renovate config extends `preset` | rewrites only the `extends` array (drops `remove_extends`), or creates `renovate.json` |
 | `file_sync` | `path` equals the template file `source` | overwrites the file |
+| `branch_strategy` | the default branch is `default_branch` (default `main`) and none of `forbidden_branches` (default `["develop"]`) exists | none: reported as *manual* |
 
 Not fixed automatically (reported as *manual*): several Renovate configs in one repo,
 invalid JSON, and `.json5` configs.

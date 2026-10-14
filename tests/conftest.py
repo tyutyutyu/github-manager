@@ -32,8 +32,9 @@ class FakeGitHub:
         archived: bool = False,
         fork: bool = False,
         default_branch: str = "main",
+        owner: str = "owner",
     ) -> str:
-        full = f"owner/{name}"
+        full = f"{owner}/{name}"
         repo = FakeRepo(Repo(name, full, default_branch, archived, fork))
         if files is not None:
             repo.commits["base"] = (None, dict(files))
@@ -49,7 +50,12 @@ class FakeGitHub:
     # --- GitHubApi -----------------------------------------------------------
 
     def list_repos(self, owner: str) -> list[Repo]:
-        return [repo.info for repo in self.repos.values()]
+        prefix = f"{owner.lower()}/"
+        return [
+            repo.info
+            for repo in self.repos.values()
+            if repo.info.full_name.lower().startswith(prefix)
+        ]
 
     def branch_sha(self, repo: str, branch: str) -> str | None:
         return self.repos[repo].branches.get(branch)
@@ -122,8 +128,19 @@ class FakeGitHub:
 
 
 class MemoryWorkspace:
-    def __init__(self, files: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        files: dict[str, str] | None = None,
+        *,
+        default_branch: str = "main",
+        branches: set[str] | None = None,
+    ) -> None:
         self.files = dict(files or {})
+        self.default_branch = default_branch
+        self.branches = {default_branch} if branches is None else branches
+
+    def branch_exists(self, branch: str) -> bool:
+        return branch in self.branches
 
     def read(self, path: str) -> str | None:
         return self.files.get(path)

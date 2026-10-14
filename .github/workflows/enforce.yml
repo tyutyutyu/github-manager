@@ -1,9 +1,12 @@
 name: enforce
 
-# Applies the central rules to every repository of the owner.
-# Requires the GH_MANAGER_TOKEN secret: a fine-grained personal access token for
-# "All repositories" with Contents: read/write, Pull requests: read/write and
-# Metadata: read (add Workflows: read/write only if a rule edits .github/workflows).
+# Applies the central rules to every repository of each owner, one job per owner.
+# A fine-grained personal access token covers a single resource owner, so every owner
+# has its own secret, each for "All repositories" with Contents: read/write,
+# Pull requests: read/write and Metadata: read (add Workflows: read/write only if a
+# rule edits .github/workflows):
+#   tyutyutyu      -> GH_MANAGER_TOKEN
+#   tyutyutyu-org  -> GH_MANAGER_ORG_TOKEN
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -15,7 +18,7 @@ on:
         options: [check, fix]
         default: check
       repo:
-        description: "Limit to one repository (optional)"
+        description: "Limit to one repository, OWNER/NAME (optional)"
         type: string
         default: ""
 
@@ -28,8 +31,17 @@ concurrency:
 
 jobs:
   enforce:
+    name: enforce (${{ matrix.owner }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: tyutyutyu
+            secret: GH_MANAGER_TOKEN
+          - owner: tyutyutyu-org
+            secret: GH_MANAGER_ORG_TOKEN
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,7 +49,13 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: Apply rules
         env:
-          GH_TOKEN: ${{ secrets.GH_MANAGER_TOKEN }}
+          GH_TOKEN: ${{ secrets[matrix.secret] }}
+          OWNER: ${{ matrix.owner }}
           MODE: ${{ inputs.mode || 'fix' }}
           REPO: ${{ inputs.repo }}
-        run: uv run --locked github-manager "$MODE" ${REPO:+--repo "$REPO"}
+        run: |
+          if [ -n "$REPO" ] && [ "${REPO%%/*}" != "$OWNER" ]; then
+            echo "Skipping: $REPO is not in $OWNER"
+            exit 0
+          fi
+          uv run --locked --no-build github-manager "$MODE" --owner "$OWNER" ${REPO:+--repo "$REPO"}

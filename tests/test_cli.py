@@ -7,7 +7,7 @@ from github_manager.cli import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, main
 from github_manager.github import GitHubError
 
 CONFIG = """
-owner = "owner"
+owners = ["owner"]
 [[rules]]
 id = "gi"
 type = "required_lines"
@@ -39,13 +39,15 @@ def test_repos_lists_selected_repositories(fake_github, config_path, capsys) -> 
 
 
 def test_check_exit_codes_and_output(fake_github, config_path, capsys) -> None:
-    fake_github.add_repo("ok", {".gitignore": ".env\n"})
+    fake_github.add_repo(
+        "ok", {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"}
+    )
     assert run(fake_github, config_path, "check") == EXIT_OK
 
     fake_github.add_repo("bad", {})
     assert run(fake_github, config_path, "check", "--diff") == EXIT_FINDINGS
     out = capsys.readouterr().out
-    assert "owner/bad: needs fix\n  [fix] gi: .gitignore: missing lines: .env" in out
+    assert "owner/bad: needs fix\n  [fix] gi: .gitignore: managed block is missing" in out
     assert "    +.env" in out
     assert "2 repositories: 1 compliant, 1 needs fix" in out
     assert fake_github.pulls["owner/bad"] == {}
@@ -70,7 +72,13 @@ def test_fix_opens_pull_requests_and_writes_step_summary(
 def test_fix_fails_on_findings_that_need_manual_action(fake_github, tmp_path) -> None:
     path = tmp_path / "c.toml"
     path.write_text(CONFIG.replace('exclude = ["*"]', ""))
-    fake_github.add_repo("app", {".gitignore": ".env\n", "renovate.json": "{broken"})
+    fake_github.add_repo(
+        "app",
+        {
+            ".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n",
+            "renovate.json": "{broken",
+        },
+    )
     assert run(fake_github, path, "fix") == EXIT_FINDINGS
 
 
@@ -83,7 +91,9 @@ def test_errors_exit_with_error_code(fake_github, config_path, tmp_path, capsys)
 
 def test_repository_errors_do_not_stop_the_run(fake_github, config_path, monkeypatch) -> None:
     fake_github.add_repo("a", {})
-    fake_github.add_repo("b", {".gitignore": ".env\n"})
+    fake_github.add_repo(
+        "b", {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"}
+    )
     original = fake_github.tree_paths
 
     def flaky(repo: str, sha: str):
