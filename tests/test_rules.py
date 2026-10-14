@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from github_manager.rules import BranchStrategy, FileSync, Finding, RenovatePreset, RequiredLines
+from github_manager.rules import (
+    BranchStrategy,
+    FileSync,
+    Finding,
+    RenovatePreset,
+    RepoSettings,
+    RequiredLines,
+)
 
 PRESET = "local>owner/central//renovate/default"
 
@@ -224,3 +231,53 @@ def test_branch_strategy_custom_options(make_workspace) -> None:
     rule = branch_strategy(default_branch="trunk", forbidden_branches=["main"])
     workspace = make_workspace(default_branch="trunk", branches={"trunk", "develop"})
     assert rule.apply(workspace) == []
+
+
+# --- repo_settings -----------------------------------------------------------
+
+
+def repo_settings(**settings) -> RepoSettings:
+    return RepoSettings.from_options({"id": "rs", "settings": settings}, Path())
+
+
+def test_repo_settings_compliant(make_workspace) -> None:
+    workspace = make_workspace(settings={"delete_branch_on_merge": True})
+    assert repo_settings(delete_branch_on_merge=True).apply(workspace) == []
+
+
+def test_repo_settings_changes_differing_values(make_workspace) -> None:
+    workspace = make_workspace(settings={"delete_branch_on_merge": False, "has_wiki": False})
+    rule = repo_settings(delete_branch_on_merge=True, has_wiki=False)
+    assert rule.apply(workspace) == [
+        Finding("rs", "setting delete_branch_on_merge is false, expected true", setting=True)
+    ]
+    assert workspace.settings == {"delete_branch_on_merge": True, "has_wiki": False}
+    assert workspace.files == {}
+
+
+def test_repo_settings_reports_unreadable_setting(make_workspace) -> None:
+    workspace = make_workspace()
+    assert repo_settings(delete_branch_on_merge=True).apply(workspace) == [
+        Finding(
+            "rs",
+            "setting delete_branch_on_merge is not readable "
+            "(the token needs Administration access)",
+            fixable=False,
+        )
+    ]
+    assert workspace.settings == {}
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({}, "missing required key 'settings'"),
+        ({"settings": {}}, "'settings' must not be empty"),
+        ({"settings": "x"}, "must be of type dict"),
+        ({"settings": {"colour": True}}, "unknown settings: colour"),
+        ({"settings": {"has_wiki": "yes"}}, "must be true or false: has_wiki"),
+    ],
+)
+def test_repo_settings_rejects_invalid_options(options, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        RepoSettings.from_options({"id": "rs", **options}, Path())

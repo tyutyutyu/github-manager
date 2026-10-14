@@ -1,4 +1,7 @@
-"""Minimal GitHub REST/GraphQL client built on the standard library."""
+"""Minimal GitHub REST/GraphQL client built on the standard library.
+
+Repository settings go through PyGithub.
+"""
 
 import base64
 import contextlib
@@ -13,6 +16,8 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from github import Auth, Github, GithubException
 
 API_URL = "https://api.github.com"
 TIMEOUT_SECONDS = 30
@@ -75,6 +80,7 @@ class GitHub:
         self._token = token
         self._api_url = api_url.rstrip("/")
         self._open = opener
+        self._client = Github(auth=Auth.Token(token), base_url=self._api_url)
 
     # --- transport ---------------------------------------------------------
 
@@ -245,6 +251,26 @@ class GitHub:
     def close_pr(self, repo: str, number: int, comment: str) -> None:
         self.call("POST", f"/repos/{repo}/issues/{number}/comments", {"body": comment})
         self.call("PATCH", f"/repos/{repo}/pulls/{number}", {"state": "closed"})
+
+    # --- repository settings (PyGithub) -------------------------------------
+
+    def repo_settings(self, repo: str) -> dict[str, Any]:
+        """The repository as GitHub returns it; settings the token may not read are absent."""
+        try:
+            return dict(self._client.get_repo(repo).raw_data)
+        except GithubException as exc:
+            raise _settings_error("GET", repo, exc) from exc
+
+    def update_repo_settings(self, repo: str, settings: dict[str, Any]) -> None:
+        try:
+            self._client.get_repo(repo).edit(**settings)
+        except GithubException as exc:
+            raise _settings_error("PATCH", repo, exc) from exc
+
+
+def _settings_error(method: str, repo: str, exc: GithubException) -> GitHubError:
+    detail = exc.data.get("message", exc.data) if isinstance(exc.data, dict) else exc.data
+    return GitHubError(f"{method} /repos/{repo}: HTTP {exc.status}: {detail}", exc.status)
 
 
 def _q(value: str) -> str:

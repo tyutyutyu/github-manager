@@ -3,8 +3,8 @@ name: enforce
 # Applies the central rules to every repository of each owner, one job per owner.
 # A fine-grained personal access token covers a single resource owner, so every owner
 # has its own secret, each for "All repositories" with Contents: read/write,
-# Pull requests: read/write and Metadata: read (add Workflows: read/write only if a
-# rule edits .github/workflows):
+# Pull requests: read/write, Administration: read/write (for repo_settings) and
+# Metadata: read (add Workflows: read/write only if a rule edits .github/workflows):
 #   tyutyutyu      -> GH_MANAGER_TOKEN
 #   tyutyutyu-org  -> GH_MANAGER_ORG_TOKEN
 on:

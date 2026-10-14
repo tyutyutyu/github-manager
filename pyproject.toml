@@ -7,7 +7,9 @@ authors = [
     { name = "Földházi István", email = "istvan.foldhazi@gmail.com" }
 ]
 requires-python = "==3.15.0"
-dependencies = []
+dependencies = [
+    "pygithub==2.10.0",
+]
 
 [project.scripts]
 github-manager = "github_manager:main"

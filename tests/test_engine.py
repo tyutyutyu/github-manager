@@ -5,12 +5,15 @@ import pytest
 from github_manager.config import Config
 from github_manager.engine import Outcome, process_repo, select_repos
 from github_manager.github import GitHubError
-from github_manager.rules import BranchStrategy, RenovatePreset, RequiredLines
+from github_manager.rules import BranchStrategy, RenovatePreset, RepoSettings, RequiredLines
 
 RULE = RequiredLines.from_options(
     {"id": "gi", "path": ".gitignore", "lines": [".env"], "exclude": ["skip-rule"]}, Path()
 )
 CONFIG = Config(owners=["owner"], rules=[RULE], exclude=["legacy-*"])
+SETTINGS_RULE = RepoSettings.from_options(
+    {"id": "rs", "settings": {"delete_branch_on_merge": True}}, Path()
+)
 
 
 def repo_named(api, name):
@@ -161,3 +164,41 @@ def test_branch_strategy_sees_repository_branches(fake_github) -> None:
         "default branch is 'master', expected 'main'",
         "forbidden branch exists: develop",
     ]
+
+
+def test_check_does_not_change_settings(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[SETTINGS_RULE])
+    name = fake_github.add_repo("app", {}, settings={"delete_branch_on_merge": False})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+    assert report.outcome is Outcome.NEEDS_FIX
+    assert fake_github.repos[name].settings == {"delete_branch_on_merge": False}
+
+
+def test_fix_applies_settings_without_pull_request(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[SETTINGS_RULE])
+    name = fake_github.add_repo("app", {}, settings={"delete_branch_on_merge": False})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert fake_github.repos[name].settings == {"delete_branch_on_merge": True}
+    assert fake_github.calls == ["settings ['delete_branch_on_merge']"]
+
+    again = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert again.outcome is Outcome.COMPLIANT
+
+
+def test_fix_applies_settings_next_to_pull_request(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RULE, SETTINGS_RULE])
+    name = fake_github.add_repo("app", {}, settings={"delete_branch_on_merge": False})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.PR_CREATED
+    assert fake_github.repos[name].settings == {"delete_branch_on_merge": True}
+
+    _, body, _ = fake_github.pulls[name][1]
+    assert "### Fixed\n- gi: .gitignore: managed block is missing\n\n" in body
+    assert (
+        "### Repository settings (applied directly)\n"
+        "- rs: setting delete_branch_on_merge is false, expected true"
+    ) in body

@@ -7,6 +7,7 @@ import urllib.request
 from email.message import Message
 
 import pytest
+from github import GithubException
 
 from github_manager import github
 from github_manager.github import GitHub, GitHubError, resolve_token
@@ -225,3 +226,44 @@ def test_resolve_token_falls_back_to_gh(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(github.shutil, "which", lambda name: None)
     with pytest.raises(GitHubError, match="no GitHub token"):
         resolve_token()
+
+
+class FakeRepository:
+    def __init__(self, raw_data: dict[str, object]) -> None:
+        self.raw_data = raw_data
+        self.edits: list[dict[str, object]] = []
+
+    def edit(self, **settings: object) -> None:
+        self.edits.append(settings)
+
+
+def test_repo_settings_use_pygithub(monkeypatch: pytest.MonkeyPatch, client: GitHub) -> None:
+    repository = FakeRepository({"full_name": "o/r", "delete_branch_on_merge": False})
+    requested: list[str] = []
+
+    def get_repo(name: str) -> FakeRepository:
+        requested.append(name)
+        return repository
+
+    monkeypatch.setattr(client._client, "get_repo", get_repo)
+    assert client.repo_settings("o/r")["delete_branch_on_merge"] is False
+    client.update_repo_settings("o/r", {"delete_branch_on_merge": True})
+    assert repository.edits == [{"delete_branch_on_merge": True}]
+    assert requested == ["o/r", "o/r"]
+
+
+@pytest.mark.parametrize(
+    "data", [{"message": "Resource not accessible"}, "Resource not accessible"]
+)
+def test_repo_settings_errors_are_wrapped(
+    monkeypatch: pytest.MonkeyPatch, client: GitHub, data: object
+) -> None:
+    def get_repo(name: str) -> FakeRepository:
+        raise GithubException(403, data)
+
+    monkeypatch.setattr(client._client, "get_repo", get_repo)
+    with pytest.raises(GitHubError, match="GET /repos/o/r: HTTP 403: Resource not accessible"):
+        client.repo_settings("o/r")
+    with pytest.raises(GitHubError, match="PATCH /repos/o/r: HTTP 403") as info:
+        client.update_repo_settings("o/r", {"delete_branch_on_merge": True})
+    assert info.value.status == 403
