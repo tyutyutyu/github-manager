@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from github_manager.rules import REQUIRED, RULE_TYPES, Options, Rule
+from github_manager.rules import REQUIRED, RULE_TYPES, Options, RepoVisibility, Rule
 
 DEFAULT_CONFIG_PATH = Path("github-manager.toml")
 
@@ -60,6 +60,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path) -> Config:
             commit_message=options.text("commit_message", defaults.commit_message),
         )
         options.finish()
+        _check_visibility_owners(config)
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
     return config
@@ -73,6 +74,18 @@ def _owners(owners: list[str]) -> list[str]:
     if duplicates:
         raise ValueError(f"duplicate owners: {', '.join(duplicates)}")
     return owners
+
+
+def _check_visibility_owners(config: Config) -> None:
+    known = {owner.lower() for owner in config.owners}
+    for rule in config.rules:
+        if not isinstance(rule, RepoVisibility):
+            continue
+        unknown = sorted(owner for owner in rule.visibility if owner.lower() not in known)
+        if unknown:
+            raise ValueError(
+                f"rule {rule.id}: visibility owners not in 'owners': {', '.join(unknown)}"
+            )
 
 
 def _parse_rule(entry: Any, base_dir: Path) -> Rule:

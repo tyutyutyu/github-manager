@@ -4,12 +4,14 @@ from pathlib import Path
 import pytest
 
 from github_manager.rules import (
+    NOT_READABLE,
     BranchStrategy,
     FileSync,
     Finding,
     RenovatePreset,
     RepoRuleset,
     RepoSettings,
+    RepoVisibility,
     RequiredLines,
     ruleset_matches,
 )
@@ -614,3 +616,77 @@ def test_ruleset_matches_compares_only_requested_keys() -> None:
     assert not ruleset_matches({"x": 1}, [{"x": 1}])
     assert not ruleset_matches([{"x": 1}, {"x": 2}], [{"x": 1}, {"x": 1}])
     assert not ruleset_matches(0, False)
+
+
+# --- repo_visibility ---------------------------------------------------------
+
+
+def visibility_rule(**table) -> RepoVisibility:
+    table = table or {"tyutyutyu": "public", "tyutyutyu-org": "private"}
+    return RepoVisibility.from_options({"id": "rv", "visibility": table}, Path())
+
+
+@pytest.mark.parametrize(
+    ("full_name", "current"),
+    [("tyutyutyu/x", "public"), ("tyutyutyu-org/y", "private"), ("Tyutyutyu/x", "public")],
+)
+def test_repo_visibility_compliant(make_workspace, full_name, current) -> None:
+    workspace = make_workspace(settings={"visibility": current}, full_name=full_name)
+    assert visibility_rule().apply(workspace) == []
+
+
+@pytest.mark.parametrize(
+    ("full_name", "current", "wanted", "owner"),
+    [
+        ("tyutyutyu/x", "private", "public", "tyutyutyu"),
+        ("tyutyutyu-org/y", "public", "private", "tyutyutyu-org"),
+        ("tyutyutyu/z", "internal", "public", "tyutyutyu"),
+        ("Tyutyutyu-Org/y", "public", "private", "Tyutyutyu-Org"),
+    ],
+)
+def test_repo_visibility_reports_mismatch_as_manual(
+    make_workspace, full_name, current, wanted, owner
+) -> None:
+    workspace = make_workspace(settings={"visibility": current}, full_name=full_name)
+    message = (
+        f'visibility is "{current}", expected "{wanted}" for owner {owner} '
+        "(change it or transfer the repository)"
+    )
+    assert visibility_rule().apply(workspace) == [Finding("rv", message, fixable=False)]
+    assert workspace.settings == {"visibility": current}
+    assert workspace.files == {}
+
+
+def test_repo_visibility_ignores_owner_missing_from_table(make_workspace) -> None:
+    workspace = make_workspace(settings={"visibility": "public"}, full_name="other/x")
+    assert visibility_rule(tyutyutyu="private").apply(workspace) == []
+
+
+def test_repo_visibility_does_not_read_setting_for_unlisted_owner(make_workspace) -> None:
+    workspace = make_workspace(full_name="other/x")
+    workspace.setting = lambda name: pytest.fail("visibility must not be read")
+    assert visibility_rule().apply(workspace) == []
+
+
+def test_repo_visibility_unreadable_is_manual(make_workspace) -> None:
+    workspace = make_workspace(full_name="tyutyutyu/x")
+    assert visibility_rule().apply(workspace) == [
+        Finding("rv", f"setting visibility {NOT_READABLE}", fixable=False)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({}, "missing required key 'visibility'"),
+        ({"visibility": {}}, "'visibility' must not be empty"),
+        ({"visibility": {"a": "public", "b": "internal"}}, "must be public or private: b"),
+        ({"visibility": {"a": True}}, "must be public or private: a"),
+        ({"visibility": {"a": "public", "A": "private"}}, "duplicate visibility owners: a"),
+        ({"visibility": {"a": "public"}, "typo": 1}, "unknown keys: typo"),
+        ({"visibility": ["a"]}, "'visibility' must be of type dict"),
+    ],
+)
+def test_repo_visibility_rejects_invalid_options(options, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        RepoVisibility.from_options({"id": "rv", **options}, Path())

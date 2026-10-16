@@ -10,6 +10,7 @@ from github_manager.rules import (
     RenovatePreset,
     RepoRuleset,
     RepoSettings,
+    RepoVisibility,
     RequiredLines,
 )
 
@@ -24,6 +25,9 @@ RULESET_RULE = RepoRuleset.from_options(
     {"id": "dr", "required_status_checks": {"owner/app": ["verify"]}}, Path()
 )
 RULESET_NAME = "github-manager: dr"
+VISIBILITY_RULE = RepoVisibility.from_options(
+    {"id": "rv", "visibility": {"owner": "private"}}, Path()
+)
 
 
 def repo_named(api, name):
@@ -461,3 +465,33 @@ def test_several_ruleset_rules_share_one_listing(fake_github) -> None:
         "create ruleset github-manager: dr",
         "create ruleset github-manager: other",
     ]
+
+
+def test_visibility_mismatch_is_reported_and_never_fixed(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[VISIBILITY_RULE])
+    name = fake_github.add_repo("pub", {}, settings={"visibility": "public"})
+    fake_github.add_repo("priv", {}, settings={"visibility": "private"})
+
+    for fix in (False, True):
+        report = process_repo(fake_github, config, repo_named(fake_github, "pub"), fix=fix)
+        assert report.outcome is Outcome.NEEDS_FIX
+        assert [finding.message for finding in report.manual_findings] == [
+            'visibility is "public", expected "private" for owner owner '
+            "(change it or transfer the repository)"
+        ]
+    ok = process_repo(fake_github, config, repo_named(fake_github, "priv"), fix=True)
+    assert ok.outcome is Outcome.COMPLIANT
+    assert fake_github.repos[name].settings == {"visibility": "public"}
+    assert not [call for call in fake_github.calls if call.startswith("settings")]
+    assert fake_github.pulls[name] == {}
+
+
+def test_visibility_finding_goes_to_manual_section_of_pull_request(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RULE, VISIBILITY_RULE])
+    name = fake_github.add_repo("app", {}, settings={"visibility": "public"})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.PR_CREATED
+    _, body, _ = fake_github.pulls[name][1]
+    assert '### Needs manual action\n- rv: visibility is "public", expected "private"' in body
+    assert fake_github.repos[name].settings == {"visibility": "public"}

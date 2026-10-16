@@ -110,6 +110,14 @@ required_status_checks = { "tyutyutyu/github-manager" = ["verify"], "tyutyutyu-o
 strict_required_status_checks = false
 exclude = []
 
+[[rules]]
+id = "repo-visibility"
+type = "repo_visibility"
+# Visibility per owner. Only reports a mismatch ([manual]); it never changes the
+# visibility or transfers a repository.
+visibility = { "tyutyutyu" = "public", "tyutyutyu-org" = "private" }
+exclude = []
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"
