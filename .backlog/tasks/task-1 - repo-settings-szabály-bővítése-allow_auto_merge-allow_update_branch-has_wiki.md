@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-10-14 21:38'
-updated_date: '2026-10-16 11:14'
+updated_date: '2026-10-16 11:15'
 labels: []
 dependencies: []
 references:
@@ -99,4 +99,8 @@ Easy GitHub started implementation on feature/TASK-1-repo-settings-szabaly-bovit
 Set the four settings in github-manager.toml and added a settings dict assertion to test_repository_config_file_is_valid. No change under src/.
 Validation: uv run ruff format -q . && task verify -> exit 0 (95 passed, 99.08% branch coverage, audit clean, build ok).
 The working tree also had unrelated github-manager.toml edits (removed excludes for tyutyutyu-org/easy-github, tyutyutyu/home-server-management, tyutyutyu/maven-mcp; one-line lines/remove_lines arrays). They were left uncommitted, outside this task.
+
+2026-10-16 enforce check run on this branch (run 38892453998): failure. tyutyutyu/github-manager and tyutyutyu/just-enough-quota-bar: compliant with the new settings. tyutyutyu/agent-skills and all 4 tyutyutyu-org repos (dotfiles, ph_toolbox, project-manager, youtube-mirror): error 'GET .../git/ref/heads/main: HTTP 403: Resource not accessible by personal access token'. Scheduled main runs fail the same way since 2026-10-14 (38516975434, 38687090055, 38856055858), so the cause is the token, not this change.
+Repo settings read via gh api on 2026-10-16: already allow_auto_merge=true, allow_update_branch=true, has_wiki=false everywhere except tyutyutyu/agent-skills allow_auto_merge=false. So the drift findings listed in Verification no longer apply; only agent-skills should report allow_auto_merge.
+AC #3 is blocked until GH_MANAGER_TOKEN and GH_MANAGER_ORG_TOKEN get Contents read access to those repos (repository selection or a pending org approval).
 <!-- SECTION:NOTES:END -->
