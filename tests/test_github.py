@@ -280,3 +280,40 @@ def test_repo_settings_errors_are_wrapped(
     with pytest.raises(GitHubError, match="PATCH /repos/o/r: HTTP 403") as info:
         client.update_repo_settings("o/r", {"delete_branch_on_merge": True})
     assert info.value.status == 403
+
+
+def test_list_rulesets_paginates_repository_level_only(http: FakeHttp, client: GitHub) -> None:
+    next_url = f"{API}/repositories/1/rulesets?includes_parents=false&per_page=100&page=2"
+    http.queue([{"id": 1}], link=f'<{next_url}>; rel="next"').queue([{"id": 2}])
+    assert client.list_rulesets("o/r") == [{"id": 1}, {"id": 2}]
+    assert http.requests == [
+        ("GET", f"{API}/repos/o/r/rulesets?includes_parents=false&per_page=100", None),
+        ("GET", next_url, None),
+    ]
+
+
+def test_list_rulesets_on_free_plan_is_none(http: FakeHttp, client: GitHub) -> None:
+    message = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+    http.queue({"message": message}, status=403)
+    assert client.list_rulesets("o/r") is None
+
+
+@pytest.mark.parametrize("status", [403, 404, 500])
+def test_list_rulesets_other_errors_are_raised(http: FakeHttp, client: GitHub, status) -> None:
+    http.queue({"message": "Resource not accessible by personal access token"}, status=status)
+    with pytest.raises(GitHubError, match=f"HTTP {status}") as info:
+        client.list_rulesets("o/r")
+    assert info.value.status == status
+
+
+def test_ruleset_reads_and_writes(http: FakeHttp, client: GitHub) -> None:
+    payload = {"name": "github-manager: x"}
+    http.queue({"id": 5}).queue({"id": 5}).queue({"id": 5, "name": "github-manager: x"})
+    assert client.create_ruleset("o/r", payload) == {"id": 5}
+    assert client.update_ruleset("o/r", 5, payload) == {"id": 5}
+    assert client.get_ruleset("o/r", 5)["name"] == "github-manager: x"
+    assert http.requests == [
+        ("POST", f"{API}/repos/o/r/rulesets", payload),
+        ("PUT", f"{API}/repos/o/r/rulesets/5", payload),
+        ("GET", f"{API}/repos/o/r/rulesets/5?includes_parents=false", None),
+    ]

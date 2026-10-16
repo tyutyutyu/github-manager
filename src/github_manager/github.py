@@ -1,6 +1,6 @@
 """Minimal GitHub REST/GraphQL client built on the standard library.
 
-Repository settings go through PyGithub.
+Repository settings go through PyGithub; rulesets use the REST transport.
 """
 
 import base64
@@ -21,6 +21,8 @@ from github import Auth, Github, GithubException
 
 API_URL = "https://api.github.com"
 TIMEOUT_SECONDS = 30
+# The 403 message of a private repository on the Free plan.
+RULESETS_UPGRADE = "Upgrade to GitHub Pro"
 
 COMMIT_MUTATION = """
 mutation($input: CreateCommitOnBranchInput!) {
@@ -251,6 +253,26 @@ class GitHub:
     def close_pr(self, repo: str, number: int, comment: str) -> None:
         self.call("POST", f"/repos/{repo}/issues/{number}/comments", {"body": comment})
         self.call("PATCH", f"/repos/{repo}/pulls/{number}", {"state": "closed"})
+
+    # --- repository rulesets (REST; PyGithub has no ruleset methods) ---------
+
+    def list_rulesets(self, repo: str) -> list[dict[str, Any]] | None:
+        """Repository-level rulesets, or None when the plan does not offer them."""
+        try:
+            return self.paginate(f"/repos/{repo}/rulesets?includes_parents=false&per_page=100")
+        except GitHubError as exc:
+            if exc.status == 403 and RULESETS_UPGRADE in str(exc):
+                return None
+            raise
+
+    def get_ruleset(self, repo: str, ruleset_id: int) -> dict[str, Any]:
+        return self.call("GET", f"/repos/{repo}/rulesets/{ruleset_id}?includes_parents=false")
+
+    def create_ruleset(self, repo: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.call("POST", f"/repos/{repo}/rulesets", payload)
+
+    def update_ruleset(self, repo: str, ruleset_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.call("PUT", f"/repos/{repo}/rulesets/{ruleset_id}", payload)
 
     # --- repository settings (PyGithub) -------------------------------------
 

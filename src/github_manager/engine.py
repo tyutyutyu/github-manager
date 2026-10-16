@@ -1,6 +1,6 @@
 """Evaluate rules against repositories and turn fixes into one pull request per repository.
 
-Setting fixes are not files: they are applied to the repository directly.
+Setting and ruleset fixes are not files: they are applied to the repository directly.
 """
 
 import difflib
@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from github_manager.config import Config
 from github_manager.github import GitHubError, PullRequest, Repo
-from github_manager.rules import Finding
+from github_manager.rules import Finding, ruleset_matches
 
 
 class GitHubApi(Protocol):
@@ -31,6 +31,12 @@ class GitHubApi(Protocol):
     def close_pr(self, repo: str, number: int, comment: str) -> None: ...
     def repo_settings(self, repo: str) -> dict[str, Any]: ...
     def update_repo_settings(self, repo: str, settings: dict[str, Any]) -> None: ...
+    def list_rulesets(self, repo: str) -> list[dict[str, Any]] | None: ...
+    def get_ruleset(self, repo: str, ruleset_id: int) -> dict[str, Any]: ...
+    def create_ruleset(self, repo: str, payload: dict[str, Any]) -> dict[str, Any]: ...
+    def update_ruleset(
+        self, repo: str, ruleset_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]: ...
 
 
 class Outcome(StrEnum):
@@ -43,6 +49,13 @@ class Outcome(StrEnum):
     PR_CLOSED = "obsolete pull request closed"
     SETTINGS_UPDATED = "settings updated"
     ERROR = "error"
+
+
+@dataclass(frozen=True)
+class RulesetChange:
+    name: str
+    ruleset_id: int | None  # None: the ruleset does not exist yet
+    payload: dict[str, Any]
 
 
 @dataclass
@@ -72,6 +85,13 @@ class RemoteWorkspace:
         self._written: dict[str, str] = {}
         self._settings: dict[str, Any] | None = None
         self._changed_settings: dict[str, Any] = {}
+        self._rulesets: list[dict[str, Any]] | None = None
+        self._rulesets_read = False
+        self._changed_rulesets: dict[str, RulesetChange] = {}
+
+    @property
+    def full_name(self) -> str:
+        return self._repo
 
     def branch_exists(self, branch: str) -> bool:
         return self._api.branch_sha(self._repo, branch) is not None
@@ -108,6 +128,21 @@ class RemoteWorkspace:
             for name, value in sorted(self._changed_settings.items())
             if _differs(current.get(name), value)
         }
+
+    def rulesets(self) -> list[dict[str, Any]] | None:
+        if not self._rulesets_read:
+            self._rulesets = self._api.list_rulesets(self._repo)
+            self._rulesets_read = True
+        return self._rulesets
+
+    def ruleset(self, ruleset_id: int) -> dict[str, Any]:
+        return self._api.get_ruleset(self._repo, ruleset_id)
+
+    def change_ruleset(self, name: str, ruleset_id: int | None, payload: dict[str, Any]) -> None:
+        self._changed_rulesets[name] = RulesetChange(name, ruleset_id, payload)
+
+    def ruleset_changes(self) -> list[RulesetChange]:
+        return [change for _, change in sorted(self._changed_rulesets.items())]
 
     def changes(self) -> dict[str, str]:
         return {
@@ -217,9 +252,23 @@ def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoRe
         settings = workspace.setting_changes()
         if settings:
             api.update_repo_settings(repo.full_name, settings)
-            if report.outcome is Outcome.NEEDS_FIX:
-                report.outcome = Outcome.SETTINGS_UPDATED
+        rulesets = workspace.ruleset_changes()
+        for change in rulesets:
+            _apply_ruleset(api, repo.full_name, change)
+        if (settings or rulesets) and report.outcome is Outcome.NEEDS_FIX:
+            report.outcome = Outcome.SETTINGS_UPDATED
     return report
+
+
+def _apply_ruleset(api: GitHubApi, repo: str, change: RulesetChange) -> None:
+    """Create or replace the ruleset, then read it back; a failed write is never retried."""
+    if change.ruleset_id is None:
+        ruleset_id = api.create_ruleset(repo, change.payload)["id"]
+    else:
+        ruleset_id = change.ruleset_id
+        api.update_ruleset(repo, ruleset_id, change.payload)
+    if not ruleset_matches(api.get_ruleset(repo, ruleset_id), change.payload):
+        raise GitHubError(f"ruleset {change.name} on {repo} differs from the request after saving")
 
 
 def _sync_pull_request(

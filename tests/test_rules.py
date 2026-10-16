@@ -8,8 +8,10 @@ from github_manager.rules import (
     FileSync,
     Finding,
     RenovatePreset,
+    RepoRuleset,
     RepoSettings,
     RequiredLines,
+    ruleset_matches,
 )
 
 PRESET = "local>owner/central//renovate/default"
@@ -408,3 +410,207 @@ def test_security_reports_unreadable_key(make_workspace) -> None:
             fixable=False,
         )
     ]
+
+
+# --- repo_ruleset ------------------------------------------------------------
+
+NAME = "github-manager: dr"
+
+
+def ruleset_rule(**overrides) -> RepoRuleset:
+    return RepoRuleset.from_options({"id": "dr", **overrides}, Path())
+
+
+def rule_types(payload: dict) -> list[str]:
+    return [rule["type"] for rule in payload["rules"]]
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"required_status_checks": {"a": []}}, "must be a non-empty list"),
+        ({"required_status_checks": {"a": [""]}}, "must be a non-empty list"),
+        ({"required_status_checks": {"a": "verify"}}, "must be a non-empty list"),
+        ({"required_status_checks": {"": ["verify"]}}, "patterns must not be empty"),
+        ({"required_status_checks": ["verify"]}, "must be of type dict"),
+        ({"strict_required_status_checks": "yes"}, "must be of type bool"),
+        ({"strict": True}, "unknown keys: strict"),
+    ],
+)
+def test_ruleset_options_are_validated(options, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        ruleset_rule(**options)
+
+
+def test_ruleset_options_defaults() -> None:
+    rule = ruleset_rule()
+    assert rule.required_status_checks == {}
+    assert not rule.strict_required_status_checks
+
+
+def test_ruleset_payload_without_checks() -> None:
+    payload = ruleset_rule().payload("owner/app")
+    assert payload == {
+        "name": NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 0,
+                    "dismiss_stale_reviews_on_push": False,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": False,
+                    "required_review_thread_resolution": True,
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                },
+            },
+        ],
+    }
+
+
+def test_ruleset_checks_are_the_sorted_union_of_matching_globs() -> None:
+    rule = ruleset_rule(
+        required_status_checks={
+            "app": ["verify", "lint"],
+            "owner/*": ["verify", "audit"],
+            "other/app": ["nope"],
+            "ap*": ["zzz"],
+            "unrelated": ["nope"],
+        },
+        strict_required_status_checks=True,
+    )
+    assert rule.checks_for("owner/app") == ["audit", "lint", "verify", "zzz"]
+    payload = rule.payload("owner/app")
+    assert rule_types(payload) == [
+        "deletion",
+        "non_fast_forward",
+        "pull_request",
+        "required_status_checks",
+    ]
+    assert payload["rules"][3] == {
+        "type": "required_status_checks",
+        "parameters": {
+            "strict_required_status_checks_policy": True,
+            "do_not_enforce_on_create": False,
+            "required_status_checks": [
+                {"context": "audit"},
+                {"context": "lint"},
+                {"context": "verify"},
+                {"context": "zzz"},
+            ],
+        },
+    }
+    assert rule.checks_for("owner/unlisted") == ["audit", "verify"]
+    assert rule.checks_for("elsewhere/unlisted") == []
+    assert "required_status_checks" not in rule_types(rule.payload("elsewhere/unlisted"))
+
+
+def test_ruleset_missing(make_workspace) -> None:
+    workspace = make_workspace(rulesets=[])
+    rule = ruleset_rule()
+    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is missing", setting=True)]
+    assert workspace.ruleset_changes == [(NAME, None, rule.payload("owner/app"))]
+
+
+def test_ruleset_up_to_date_with_server_defaults(with_server_defaults, make_workspace) -> None:
+    rule = ruleset_rule(required_status_checks={"app": ["verify"]})
+    server = with_server_defaults(rule.payload("owner/app"))
+    workspace = make_workspace(rulesets=[server])
+    assert rule.apply(workspace) == []
+    assert workspace.ruleset_changes == []
+
+
+def test_ruleset_rule_order_does_not_matter(with_server_defaults, make_workspace) -> None:
+    rule = ruleset_rule()
+    server = with_server_defaults(rule.payload("owner/app"))
+    server["rules"].reverse()
+    assert rule.apply(make_workspace(rulesets=[server])) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda p: p.update(enforcement="evaluate"),
+        lambda p: p.update(bypass_actors=[{"actor_id": 1, "actor_type": "Team"}]),
+        lambda p: p["conditions"]["ref_name"].update(include=["refs/heads/main"]),
+        lambda p: p["rules"].pop(0),
+        lambda p: p["rules"].append({"type": "creation"}),
+        lambda p: p["rules"][2]["parameters"].update(required_approving_review_count=1),
+        lambda p: p["rules"][2]["parameters"].update(allowed_merge_methods=["merge"]),
+    ],
+    ids=[
+        "enforcement",
+        "bypass",
+        "condition",
+        "rule-removed",
+        "rule-added",
+        "approvals",
+        "merge-methods",
+    ],
+)
+def test_ruleset_outdated(with_server_defaults, make_workspace, change) -> None:
+    rule = ruleset_rule()
+    server = with_server_defaults(rule.payload("owner/app"), ruleset_id=7)
+    change(server)
+    workspace = make_workspace(rulesets=[server])
+    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is outdated", setting=True)]
+    assert workspace.ruleset_changes == [(NAME, 7, rule.payload("owner/app"))]
+
+
+def test_ruleset_outdated_when_checks_change(with_server_defaults, make_workspace) -> None:
+    server = with_server_defaults(ruleset_rule().payload("owner/app"))
+    rule = ruleset_rule(required_status_checks={"app": ["verify"]})
+    workspace = make_workspace(rulesets=[server])
+    assert [f.message for f in rule.apply(workspace)] == [f"ruleset {NAME} is outdated"]
+
+
+def test_ruleset_ignores_manual_and_inherited_rulesets(
+    with_server_defaults, make_workspace
+) -> None:
+    rule = ruleset_rule()
+    payload = rule.payload("owner/app")
+    manual = {**with_server_defaults(payload, 1), "name": "Protect main"}
+    inherited = with_server_defaults(payload, 2, source_type="Organization")
+    workspace = make_workspace(rulesets=[manual, inherited])
+    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is missing", setting=True)]
+    assert workspace.ruleset_changes == [(NAME, None, payload)]
+
+
+def test_ruleset_duplicate_managed_name_is_manual(with_server_defaults, make_workspace) -> None:
+    rule = ruleset_rule()
+    payload = rule.payload("owner/app")
+    workspace = make_workspace(
+        rulesets=[with_server_defaults(payload, 1), with_server_defaults(payload, 2)]
+    )
+    assert rule.apply(workspace) == [
+        Finding("dr", f"multiple rulesets named {NAME}", fixable=False)
+    ]
+    assert workspace.ruleset_changes == []
+
+
+def test_ruleset_unavailable_on_free_plan_is_manual(make_workspace) -> None:
+    workspace = make_workspace(rulesets_available=False)
+    [finding] = ruleset_rule().apply(workspace)
+    assert not finding.fixable
+    assert not finding.setting
+    assert "GitHub Free" in finding.message
+    assert workspace.ruleset_changes == []
+
+
+def test_ruleset_matches_compares_only_requested_keys() -> None:
+    assert ruleset_matches({"a": 1, "b": 2}, {"a": 1})
+    assert not ruleset_matches({"a": 1}, {"b": 1})
+    assert not ruleset_matches({"a": 1}, {"a": 2})
+    assert not ruleset_matches(1, {"a": 1})
+    assert ruleset_matches([{"x": 1, "y": 2}, {"x": 3}], [{"x": 3}, {"x": 1}])
+    assert not ruleset_matches([{"x": 1}], [{"x": 1}, {"x": 1}])
+    assert not ruleset_matches([{"x": 1}, {"x": 1}], [{"x": 1}])
+    assert not ruleset_matches({"x": 1}, [{"x": 1}])
+    assert not ruleset_matches([{"x": 1}, {"x": 2}], [{"x": 1}, {"x": 1}])
+    assert not ruleset_matches(0, False)

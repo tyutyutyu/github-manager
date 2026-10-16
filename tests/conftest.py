@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,27 @@ class FakeRepo:
     # commit sha -> (parent sha, files)
     commits: dict[str, tuple[str | None, dict[str, str]]] = field(default_factory=dict)
     settings: dict[str, Any] = field(default_factory=dict)
+    rulesets: dict[int, dict[str, Any]] = field(default_factory=dict)
+    # False: the plan does not offer rulesets (GitHub Free, private repository).
+    rulesets_available: bool = True
+    # True: a ruleset write is accepted but not stored (to test the read-back).
+    drop_ruleset_writes: bool = False
+
+
+def server_ruleset(
+    ruleset_id: int, payload: dict[str, Any], source_type: str = "Repository"
+) -> dict[str, Any]:
+    """A ruleset as the server returns it: the payload plus defaults GitHub adds itself."""
+    ruleset = copy.deepcopy(payload)
+    ruleset.update(id=ruleset_id, source_type=source_type, node_id="x", _links={})
+    for rule in ruleset.get("rules", []):
+        parameters = rule.get("parameters", {})
+        if rule["type"] == "pull_request":
+            parameters.update(required_reviewers=[], dismissal_restriction=None)
+        if rule["type"] == "required_status_checks":
+            for check in parameters["required_status_checks"]:
+                check["integration_id"] = 15368
+    return ruleset
 
 
 class FakeGitHub:
@@ -36,15 +58,32 @@ class FakeGitHub:
         default_branch: str = "main",
         owner: str = "owner",
         settings: dict[str, Any] | None = None,
+        rulesets_available: bool = True,
     ) -> str:
         full = f"{owner}/{name}"
-        repo = FakeRepo(Repo(name, full, default_branch, archived, fork), settings=settings or {})
+        repo = FakeRepo(
+            Repo(name, full, default_branch, archived, fork),
+            settings=settings or {},
+            rulesets_available=rulesets_available,
+        )
         if files is not None:
             repo.commits["base"] = (None, dict(files))
             repo.branches[default_branch] = "base"
         self.repos[full] = repo
         self.pulls[full] = {}
         return full
+
+    def add_ruleset(
+        self,
+        repo: str,
+        payload: dict[str, Any],
+        *,
+        source_type: str = "Repository",
+    ) -> int:
+        state = self.repos[repo]
+        ruleset_id = max(state.rulesets, default=100) + 1
+        state.rulesets[ruleset_id] = server_ruleset(ruleset_id, payload, source_type)
+        return ruleset_id
 
     def files_at(self, repo: str, branch: str) -> dict[str, str]:
         state = self.repos[repo]
@@ -136,6 +175,34 @@ class FakeGitHub:
         self.repos[repo].settings.update(settings)
         self.calls.append(f"settings {sorted(settings)}")
 
+    def list_rulesets(self, repo: str) -> list[dict[str, Any]] | None:
+        state = self.repos[repo]
+        if not state.rulesets_available:
+            return None
+        # The listing carries summaries only.
+        return [
+            {"id": item["id"], "name": item["name"], "source_type": item["source_type"]}
+            for item in state.rulesets.values()
+        ]
+
+    def get_ruleset(self, repo: str, ruleset_id: int) -> dict[str, Any]:
+        return copy.deepcopy(self.repos[repo].rulesets[ruleset_id])
+
+    def create_ruleset(self, repo: str, payload: dict[str, Any]) -> dict[str, Any]:
+        state = self.repos[repo]
+        self.calls.append(f"create ruleset {payload['name']}")
+        ruleset_id = max(state.rulesets, default=100) + 1
+        if not state.drop_ruleset_writes:
+            state.rulesets[ruleset_id] = server_ruleset(ruleset_id, payload, "Repository")
+        return {"id": ruleset_id}
+
+    def update_ruleset(self, repo: str, ruleset_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        state = self.repos[repo]
+        self.calls.append(f"update ruleset {ruleset_id}")
+        if not state.drop_ruleset_writes:
+            state.rulesets[ruleset_id] = server_ruleset(ruleset_id, payload, "Repository")
+        return {"id": ruleset_id}
+
 
 class MemoryWorkspace:
     def __init__(
@@ -145,8 +212,16 @@ class MemoryWorkspace:
         default_branch: str = "main",
         branches: set[str] | None = None,
         settings: dict[str, Any] | None = None,
+        full_name: str = "owner/app",
+        rulesets: list[dict[str, Any]] | None = None,
+        rulesets_available: bool = True,
     ) -> None:
         self.files = dict(files or {})
+        self.full_name = full_name
+        # Each item is a full server ruleset.
+        self.ruleset_items = rulesets or []
+        self.rulesets_available = rulesets_available
+        self.ruleset_changes: list[tuple[str, int | None, dict[str, Any]]] = []
         self.settings = dict(settings or {})
         self.default_branch = default_branch
         self.branches = {default_branch} if branches is None else branches
@@ -166,6 +241,15 @@ class MemoryWorkspace:
     def change_setting(self, name: str, value: Any) -> None:
         self.settings[name] = value
 
+    def rulesets(self) -> list[dict[str, Any]] | None:
+        return self.ruleset_items if self.rulesets_available else None
+
+    def ruleset(self, ruleset_id: int) -> dict[str, Any]:
+        return next(item for item in self.ruleset_items if item["id"] == ruleset_id)
+
+    def change_ruleset(self, name: str, ruleset_id: int | None, payload: dict[str, Any]) -> None:
+        self.ruleset_changes.append((name, ruleset_id, payload))
+
 
 @pytest.fixture
 def fake_github() -> FakeGitHub:
@@ -175,3 +259,11 @@ def fake_github() -> FakeGitHub:
 @pytest.fixture
 def make_workspace():
     return MemoryWorkspace
+
+
+@pytest.fixture
+def with_server_defaults():
+    def build(payload: dict[str, Any], ruleset_id: int = 7, source_type: str = "Repository"):
+        return server_ruleset(ruleset_id, payload, source_type)
+
+    return build

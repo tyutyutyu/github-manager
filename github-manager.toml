@@ -98,6 +98,18 @@ settings = { delete_branch_on_merge = true, allow_auto_merge = true, allow_updat
 security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }
 exclude = []
 
+[[rules]]
+id = "default-branch-ruleset"
+type = "repo_ruleset"
+# Ruleset "github-manager: default-branch-ruleset" on the default branch: no deletion, no
+# force push, pull request required, no bypass actors. Applied directly, not by pull
+# request. Other rulesets are left alone. Needs a token with Administration: read/write.
+# Required checks per repository (glob on the name or OWNER/NAME); only names that report
+# on the default branch, otherwise no pull request can be merged there.
+required_status_checks = { "tyutyutyu/github-manager" = ["verify"], "tyutyutyu-org/ph_toolbox" = ["verify"], "tyutyutyu-org/youtube-mirror" = ["test"] }
+strict_required_status_checks = false
+exclude = []
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"

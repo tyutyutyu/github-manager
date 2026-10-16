@@ -2,7 +2,7 @@
 
 Rules never talk to GitHub directly: they read and write through a `Workspace`,
 so the same code serves `check` (changes are discarded) and `fix` (file changes are
-committed to a pull request, setting changes are applied to the repository).
+committed to a pull request, setting and ruleset changes are applied to the repository).
 """
 
 import contextlib
@@ -19,6 +19,9 @@ class Workspace(Protocol):
     @property
     def default_branch(self) -> str: ...
 
+    @property
+    def full_name(self) -> str: ...
+
     def branch_exists(self, branch: str) -> bool: ...
 
     def read(self, path: str) -> str | None: ...
@@ -29,13 +32,21 @@ class Workspace(Protocol):
 
     def change_setting(self, name: str, value: Any) -> None: ...
 
+    def rulesets(self) -> list[dict[str, Any]] | None: ...
+
+    def ruleset(self, ruleset_id: int) -> dict[str, Any]: ...
+
+    def change_ruleset(
+        self, name: str, ruleset_id: int | None, payload: dict[str, Any]
+    ) -> None: ...
+
 
 @dataclass(frozen=True)
 class Finding:
     rule_id: str
     message: str
     fixable: bool = True
-    # Fixed through the repository settings, not through the pull request.
+    # Fixed through the repository settings or rulesets, not through the pull request.
     setting: bool = False
 
 
@@ -462,7 +473,157 @@ class RepoSettings(Rule):
         return findings
 
 
+RULESET_PREFIX = "github-manager: "
+RULESETS_UNAVAILABLE = (
+    "rulesets are not available (a private repository on the GitHub Free plan: "
+    "upgrade to GitHub Pro or make the repository public)"
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class RepoRuleset(Rule):
+    """The default branch must be protected by a ruleset owned by github-manager.
+
+    The ruleset is named `github-manager: <rule id>`; it forbids deleting and force
+    pushing the default branch and requires a pull request, without bypass actors.
+    `required_status_checks` maps repository globs (name or OWNER/NAME) to check names;
+    a repository gets the union of the checks of every matching glob. Other rulesets are
+    never touched. Fixes are applied to the repository directly, not by pull request.
+    """
+
+    type_name: ClassVar[str] = "repo_ruleset"
+
+    required_status_checks: dict[str, list[str]] = field(default_factory=dict)
+    strict_required_status_checks: bool = False
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        checks = options.table("required_status_checks", {})
+        for pattern, names in checks.items():
+            if not pattern:
+                raise ValueError("'required_status_checks' patterns must not be empty")
+            if (
+                not isinstance(names, list)
+                or not names
+                or not all(isinstance(name, str) and name for name in names)
+            ):
+                raise ValueError(
+                    f"'required_status_checks' {pattern!r} must be a non-empty list "
+                    "of non-empty strings"
+                )
+        return cls(
+            required_status_checks=checks,
+            strict_required_status_checks=options.flag("strict_required_status_checks", False),
+            **common,
+        )
+
+    @property
+    def ruleset_name(self) -> str:
+        return f"{RULESET_PREFIX}{self.id}"
+
+    def checks_for(self, full_name: str) -> list[str]:
+        name = full_name.split("/", 1)[-1]
+        return sorted(
+            {
+                check
+                for pattern, checks in self.required_status_checks.items()
+                if fnmatchcase(name, pattern) or fnmatchcase(full_name, pattern)
+                for check in checks
+            }
+        )
+
+    def payload(self, full_name: str) -> dict[str, Any]:
+        rules: list[dict[str, Any]] = [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 0,
+                    "dismiss_stale_reviews_on_push": False,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": False,
+                    "required_review_thread_resolution": True,
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                },
+            },
+        ]
+        checks = self.checks_for(full_name)
+        if checks:
+            rules.append(
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "strict_required_status_checks_policy": self.strict_required_status_checks,
+                        "do_not_enforce_on_create": False,
+                        "required_status_checks": [{"context": check} for check in checks],
+                    },
+                }
+            )
+        return {
+            "name": self.ruleset_name,
+            "target": "branch",
+            "enforcement": "active",
+            "bypass_actors": [],
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "rules": rules,
+        }
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        listed = workspace.rulesets()
+        if listed is None:
+            return [Finding(self.id, RULESETS_UNAVAILABLE, fixable=False)]
+        managed = [
+            item
+            for item in listed
+            if item.get("source_type") == "Repository" and item.get("name") == self.ruleset_name
+        ]
+        if len(managed) > 1:
+            message = f"multiple rulesets named {self.ruleset_name}"
+            return [Finding(self.id, message, fixable=False)]
+
+        wanted = self.payload(workspace.full_name)
+        if not managed:
+            workspace.change_ruleset(self.ruleset_name, None, wanted)
+            return [Finding(self.id, f"ruleset {self.ruleset_name} is missing", setting=True)]
+        ruleset_id = managed[0]["id"]
+        if ruleset_matches(workspace.ruleset(ruleset_id), wanted):
+            return []
+        workspace.change_ruleset(self.ruleset_name, ruleset_id, wanted)
+        return [Finding(self.id, f"ruleset {self.ruleset_name} is outdated", setting=True)]
+
+
+def ruleset_matches(current: Any, wanted: Any) -> bool:
+    """True when `current` carries everything in `wanted`.
+
+    Only the keys in `wanted` count: GitHub adds defaults of its own (e.g. `required_reviewers`,
+    `integration_id`). Lists compare without regard to order.
+    """
+    if isinstance(wanted, dict):
+        return isinstance(current, dict) and all(
+            key in current and ruleset_matches(current[key], value) for key, value in wanted.items()
+        )
+    if isinstance(wanted, list):
+        if not isinstance(current, list) or len(current) != len(wanted):
+            return False
+        remaining = list(current)
+        for item in wanted:
+            found = next((c for c in remaining if ruleset_matches(c, item)), None)
+            if found is None:
+                return False
+            remaining.remove(found)
+        return True
+    return current == wanted and type(current) is type(wanted)
+
+
 RULE_TYPES: dict[str, type[Rule]] = {
     rule.type_name: rule
-    for rule in (RequiredLines, RenovatePreset, FileSync, BranchStrategy, RepoSettings)
+    for rule in (
+        RequiredLines,
+        RenovatePreset,
+        FileSync,
+        BranchStrategy,
+        RepoSettings,
+        RepoRuleset,
+    )
 }
