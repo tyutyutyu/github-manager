@@ -20,6 +20,14 @@ def test_repository_config_file_is_valid() -> None:
         BranchStrategy,
         RepoSettings,
     ]
+    repo_settings = config.rules[-1]
+    assert isinstance(repo_settings, RepoSettings)
+    assert repo_settings.settings == {
+        "delete_branch_on_merge": True,
+        "allow_auto_merge": True,
+        "allow_update_branch": True,
+        "has_wiki": False,
+    }
 
 
 def test_defaults_apply(tmp_path: Path) -> None:
