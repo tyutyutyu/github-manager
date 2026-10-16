@@ -8,6 +8,7 @@ from github_manager.rules import (
     RenovatePreset,
     RepoRuleset,
     RepoSettings,
+    RepoVisibility,
     RequiredLines,
 )
 
@@ -26,6 +27,7 @@ def test_repository_config_file_is_valid() -> None:
         BranchStrategy,
         RepoSettings,
         RepoRuleset,
+        RepoVisibility,
     ]
     repo_settings = config.rules[3]
     assert isinstance(repo_settings, RepoSettings)
@@ -48,6 +50,10 @@ def test_repository_config_file_is_valid() -> None:
         "tyutyutyu-org/youtube-mirror": ["test"],
     }
     assert not ruleset.strict_required_status_checks
+    visibility = config.rules[5]
+    assert isinstance(visibility, RepoVisibility)
+    assert visibility.id == "repo-visibility"
+    assert visibility.visibility == {"tyutyutyu": "public", "tyutyutyu-org": "private"}
 
 
 def test_defaults_apply(tmp_path: Path) -> None:
@@ -80,6 +86,21 @@ def test_defaults_apply(tmp_path: Path) -> None:
 def test_invalid_config_is_rejected(raw, message) -> None:
     with pytest.raises(ConfigError, match=message):
         parse_config(raw, Path())
+
+
+def visibility_rule(**table) -> dict:
+    return {"id": "rv", "type": "repo_visibility", "visibility": table}
+
+
+def test_visibility_owners_must_be_listed_in_owners() -> None:
+    raw = {"owners": ["me"], "rules": [visibility_rule(me="public", typo="private", Oops="public")]}
+    with pytest.raises(ConfigError, match="rule rv: visibility owners not in 'owners': Oops, typo"):
+        parse_config(raw, Path())
+
+
+def test_visibility_owners_match_case_insensitively_and_may_be_partial() -> None:
+    raw = {"owners": ["Me", "other"], "rules": [visibility_rule(me="public")]}
+    assert parse_config(raw, Path()).owners == ["Me", "other"]
 
 
 def test_missing_and_malformed_files(tmp_path: Path) -> None:

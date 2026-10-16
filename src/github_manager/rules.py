@@ -616,6 +616,56 @@ def ruleset_matches(current: Any, wanted: Any) -> bool:
     return current == wanted and type(current) is type(wanted)
 
 
+VISIBILITIES = frozenset({"public", "private"})
+
+
+@dataclass(frozen=True, kw_only=True)
+class RepoVisibility(Rule):
+    """The repositories of an owner must have the visibility given in `visibility`.
+
+    `visibility` maps an owner to `public` or `private`; owners missing from it are not
+    checked. Changing the visibility or transferring a repository is a human decision, so
+    every mismatch needs manual action and nothing is written.
+    """
+
+    type_name: ClassVar[str] = "repo_visibility"
+
+    visibility: dict[str, str]
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        visibility = options.table("visibility", REQUIRED)
+        if not visibility:
+            raise ValueError("'visibility' must not be empty")
+        invalid = sorted(owner for owner, value in visibility.items() if value not in VISIBILITIES)
+        if invalid:
+            raise ValueError(f"visibility values must be public or private: {', '.join(invalid)}")
+        lowered = [owner.lower() for owner in visibility]
+        duplicates = sorted({owner for owner in lowered if lowered.count(owner) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate visibility owners: {', '.join(duplicates)}")
+        return cls(visibility=visibility, **common)
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        owner = workspace.full_name.split("/", 1)[0]
+        wanted = next(
+            (value for key, value in self.visibility.items() if key.lower() == owner.lower()),
+            None,
+        )
+        if wanted is None:
+            return []
+        current = workspace.setting("visibility")
+        if current is None:
+            return [Finding(self.id, f"setting visibility {NOT_READABLE}", fixable=False)]
+        if current == wanted:
+            return []
+        message = (
+            f"visibility is {json.dumps(current)}, expected {json.dumps(wanted)} "
+            f"for owner {owner} (change it or transfer the repository)"
+        )
+        return [Finding(self.id, message, fixable=False)]
+
+
 RULE_TYPES: dict[str, type[Rule]] = {
     rule.type_name: rule
     for rule in (
@@ -625,5 +675,6 @@ RULE_TYPES: dict[str, type[Rule]] = {
         BranchStrategy,
         RepoSettings,
         RepoRuleset,
+        RepoVisibility,
     )
 }

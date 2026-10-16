@@ -82,6 +82,18 @@ def test_fix_fails_on_findings_that_need_manual_action(fake_github, tmp_path) ->
     assert run(fake_github, path, "fix") == EXIT_FINDINGS
 
 
+def test_fix_reports_visibility_mismatch_as_manual(fake_github, tmp_path, capsys) -> None:
+    path = tmp_path / "c.toml"
+    path.write_text(
+        'owners = ["owner"]\n[[rules]]\nid = "rv"\ntype = "repo_visibility"\n'
+        'visibility = { owner = "private" }\n'
+    )
+    fake_github.add_repo("app", {}, settings={"visibility": "public"})
+    assert run(fake_github, path, "fix") == EXIT_FINDINGS
+    assert "  [manual] rv: visibility is " in capsys.readouterr().out
+    assert not [call for call in fake_github.calls if call.startswith("settings")]
+
+
 def test_errors_exit_with_error_code(fake_github, config_path, tmp_path, capsys) -> None:
     assert run(fake_github, tmp_path / "missing.toml", "check") == EXIT_ERROR
     assert "error: config file not found" in capsys.readouterr().err

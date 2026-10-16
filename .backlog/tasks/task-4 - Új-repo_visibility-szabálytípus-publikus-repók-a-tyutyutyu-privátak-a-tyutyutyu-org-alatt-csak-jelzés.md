@@ -3,10 +3,10 @@ id: TASK-4
 title: >-
   Új repo_visibility szabálytípus: publikus repók a tyutyutyu, privátak a
   tyutyutyu-org alatt (csak jelzés)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16 17:19'
-updated_date: '2026-10-16 17:20'
+updated_date: '2026-10-16 19:02'
 labels: []
 dependencies: []
 documentation:
@@ -98,18 +98,32 @@ Kódbeli kiindulópontok:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `repo_visibility` szabály eltérő láthatóság esetén ownerenként pontosan egy `fixable=False` findingot ad, ami megnevezi a tényleges és az elvárt értéket és az ownert; egyezésnél nincs finding
-- [ ] #2 A szabály `check` és `fix` módban sem ír fájlt, nem módosít beállítást vagy rulesetet, és nem nyit PR-t (a `fix` riport `needs fix` marad)
-- [ ] #3 Az owner-egyeztetés kis- és nagybetűtől független; a `visibility` táblában nem szereplő owner repóira nincs finding
-- [ ] #4 A válaszból hiányzó `visibility` `fixable=False` findingot ad a `NOT_READABLE` szöveggel, nem megy át csendben
-- [ ] #5 Config-hiba (`ConfigError`): hiányzó vagy üres `visibility` tábla, `public`/`private`-tól eltérő érték, kis- és nagybetűs duplikált owner, illetve olyan owner-kulcs, ami nincs az `owners` listában
-- [ ] #6 A `github-manager.toml` tartalmazza a `repo-visibility` szabályt (`tyutyutyu` = `public`, `tyutyutyu-org` = `private`) utolsóként, és a `test_repository_config_file_is_valid` ezt ellenőrzi
-- [ ] #7 A README szabálytáblája és a „Not fixed automatically” felsorolás leírja az új szabályt; a token-tábla változatlan
+- [x] #1 A `repo_visibility` szabály eltérő láthatóság esetén ownerenként pontosan egy `fixable=False` findingot ad, ami megnevezi a tényleges és az elvárt értéket és az ownert; egyezésnél nincs finding
+- [x] #2 A szabály `check` és `fix` módban sem ír fájlt, nem módosít beállítást vagy rulesetet, és nem nyit PR-t (a `fix` riport `needs fix` marad)
+- [x] #3 Az owner-egyeztetés kis- és nagybetűtől független; a `visibility` táblában nem szereplő owner repóira nincs finding
+- [x] #4 A válaszból hiányzó `visibility` `fixable=False` findingot ad a `NOT_READABLE` szöveggel, nem megy át csendben
+- [x] #5 Config-hiba (`ConfigError`): hiányzó vagy üres `visibility` tábla, `public`/`private`-tól eltérő érték, kis- és nagybetűs duplikált owner, illetve olyan owner-kulcs, ami nincs az `owners` listában
+- [x] #6 A `github-manager.toml` tartalmazza a `repo-visibility` szabályt (`tyutyutyu` = `public`, `tyutyutyu-org` = `private`) utolsóként, és a `test_repository_config_file_is_valid` ezt ellenőrzi
+- [x] #7 A README szabálytáblája és a „Not fixed automatically” felsorolás leírja az új szabályt; a token-tábla változatlan
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 A `uv run ruff format -q .` és a `task verify` hiba nélkül lefut (formázás, lint, ty, deptry, pytest ≥80% branch coverage, audit, build)
-- [ ] #2 Az új tesztek egyike sem hív valódi GitHub API-t; éles fiókon legfeljebb a csak olvasó `github-manager repos` parancs fut
-- [ ] #3 A `.claude/skills/github-manager-rules/SKILL.md` leírása a valódi config tesztjéről az új szabálysorrendhez igazodik
+- [x] #1 A `uv run ruff format -q .` és a `task verify` hiba nélkül lefut (formázás, lint, ty, deptry, pytest ≥80% branch coverage, audit, build)
+- [x] #2 Az új tesztek egyike sem hív valódi GitHub API-t; éles fiókon legfeljebb a csak olvasó `github-manager repos` parancs fut
+- [x] #3 A `.claude/skills/github-manager-rules/SKILL.md` leírása a valódi config tesztjéről az új szabálysorrendhez igazodik
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-4-uj-repo-visibility-szabalytipus-publikus-repok-a.
+
+Validation: task verify exit 0 (format, ruff, ty, deptry, 177 tests, 99.39% coverage, audit, build).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added repo_visibility rule (report-only, fixable=False findings), config check that visibility owners are in owners, repo-visibility rule in github-manager.toml, tests and README. Verified with task verify (177 passed, 99.39% coverage).
+<!-- SECTION:FINAL_SUMMARY:END -->
