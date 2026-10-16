@@ -1,9 +1,10 @@
 ---
 id: TASK-3
 title: Secret scanning és push protection publikus repókon a repo_settings szabállyal
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14 21:39'
+updated_date: '2026-10-16 12:37'
 labels: []
 dependencies: []
 references:
@@ -92,15 +93,29 @@ A `repo_settings` szabály opcionálisan előírhatja a `secret_scanning` és `s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `repo_settings` szabály elfogad egy opcionális `security_and_analysis` táblát pontosan a `secret_scanning` és `secret_scanning_push_protection` alkulccsal, `"enabled"`/`"disabled"` értékkel; más alkulcsra vagy értékre konfigurációs hibát ad
-- [ ] #2 Publikus repón az eltérő állapot fixable findinget ad; `fix` módban egyetlen PATCH (PyGithub `edit(security_and_analysis=...)`) állítja be mindkettőt, és a második futás `compliant`
-- [ ] #3 Privát és internal repón a biztonsági rész nem ad findinget és nem ír semmit
-- [ ] #4 Ha a válaszból hiányzik a `security_and_analysis` egy publikus repón, `[manual]` „not readable” finding keletkezik
-- [ ] #5 A logikai beállítások eddigi viselkedése és tesztjei változatlanok
-- [ ] #6 A `github-manager.toml` `repo-settings` szabálya mindkét alkulcsot `"enabled"`-re írja elő, a README `repo_settings` sora leírja az opciót és a csak-publikus korlátot
+- [x] #1 A `repo_settings` szabály elfogad egy opcionális `security_and_analysis` táblát pontosan a `secret_scanning` és `secret_scanning_push_protection` alkulccsal, `"enabled"`/`"disabled"` értékkel; más alkulcsra vagy értékre konfigurációs hibát ad
+- [x] #2 Publikus repón az eltérő állapot fixable findinget ad; `fix` módban egyetlen PATCH (PyGithub `edit(security_and_analysis=...)`) állítja be mindkettőt, és a második futás `compliant`
+- [x] #3 Privát és internal repón a biztonsági rész nem ad findinget és nem ír semmit
+- [x] #4 Ha a válaszból hiányzik a `security_and_analysis` egy publikus repón, `[manual]` „not readable” finding keletkezik
+- [x] #5 A logikai beállítások eddigi viselkedése és tesztjei változatlanok
+- [x] #6 A `github-manager.toml` `repo-settings` szabálya mindkét alkulcsot `"enabled"`-re írja elő, a README `repo_settings` sora leírja az opciót és a csak-publikus korlátot
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 A `task verify` sikeres
+- [x] #1 A `task verify` sikeres
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-3-secret-scanning-es-push-protection-publikus-repo.
+
+Validation: ruff format check and pytest (114 passed, 99.26% branch coverage) rerun; workflow task verify exited 0. Nested security_and_analysis payloads merge across rules in RemoteWorkspace (single PATCH).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added optional security_and_analysis (secret_scanning, secret_scanning_push_protection) to repo_settings: validated, public-only, one merged PATCH via change_setting; config and README updated. Verified with task verify (exit 0) and pytest 114 passed, 99.26% coverage.
+<!-- SECTION:FINAL_SUMMARY:END -->

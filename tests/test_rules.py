@@ -276,8 +276,135 @@ def test_repo_settings_reports_unreadable_setting(make_workspace) -> None:
         ({"settings": "x"}, "must be of type dict"),
         ({"settings": {"colour": True}}, "unknown settings: colour"),
         ({"settings": {"has_wiki": "yes"}}, "must be true or false: has_wiki"),
+        ({"security_and_analysis": {}}, "'settings' must not be empty"),
+        ({"settings": {}, "security_and_analysis": {}}, "'settings' must not be empty"),
+        ({"security_and_analysis": "x"}, "must be of type dict"),
+        (
+            {"security_and_analysis": {"dependabot_security_updates": "enabled"}},
+            "unknown security_and_analysis settings: dependabot_security_updates",
+        ),
+        (
+            {"security_and_analysis": {"secret_scanning": "on"}},
+            "values must be enabled or disabled: secret_scanning",
+        ),
+        (
+            {"security_and_analysis": {"secret_scanning": True}},
+            "values must be enabled or disabled: secret_scanning",
+        ),
     ],
 )
 def test_repo_settings_rejects_invalid_options(options, message) -> None:
     with pytest.raises(ValueError, match=message):
         RepoSettings.from_options({"id": "rs", **options}, Path())
+
+
+def security_rule(**security) -> RepoSettings:
+    return RepoSettings.from_options({"id": "rs", "security_and_analysis": security}, Path())
+
+
+WANTED_SECURITY = {"secret_scanning": "enabled", "secret_scanning_push_protection": "enabled"}
+
+
+def security_state(scanning: str, protection: str) -> dict:
+    return {
+        "secret_scanning": {"status": scanning},
+        "secret_scanning_push_protection": {"status": protection},
+    }
+
+
+def test_repo_settings_accepts_security_only_or_together() -> None:
+    rule = security_rule(**WANTED_SECURITY)
+    assert rule.settings == {}
+    assert rule.security_and_analysis == WANTED_SECURITY
+    both = RepoSettings.from_options(
+        {"id": "rs", "settings": {"has_wiki": False}, "security_and_analysis": WANTED_SECURITY},
+        Path(),
+    )
+    assert both.settings == {"has_wiki": False}
+
+
+def test_security_public_mismatch_is_one_change(make_workspace) -> None:
+    workspace = make_workspace(
+        settings={
+            "visibility": "public",
+            "security_and_analysis": security_state("disabled", "disabled"),
+        }
+    )
+    assert security_rule(**WANTED_SECURITY).apply(workspace) == [
+        Finding(
+            "rs",
+            'setting security_and_analysis.secret_scanning is "disabled", expected "enabled"',
+            setting=True,
+        ),
+        Finding(
+            "rs",
+            "setting security_and_analysis.secret_scanning_push_protection "
+            'is "disabled", expected "enabled"',
+            setting=True,
+        ),
+    ]
+    assert workspace.settings["security_and_analysis"] == {
+        "secret_scanning": {"status": "enabled"},
+        "secret_scanning_push_protection": {"status": "enabled"},
+    }
+
+
+def test_security_public_only_differing_key_is_written(make_workspace) -> None:
+    workspace = make_workspace(
+        settings={
+            "visibility": "public",
+            "security_and_analysis": security_state("enabled", "disabled"),
+        }
+    )
+    findings = security_rule(**WANTED_SECURITY).apply(workspace)
+    assert len(findings) == 1
+    assert workspace.settings["security_and_analysis"] == {
+        "secret_scanning_push_protection": {"status": "enabled"}
+    }
+
+
+def test_security_public_compliant(make_workspace) -> None:
+    workspace = make_workspace(
+        settings={
+            "visibility": "public",
+            "security_and_analysis": security_state("enabled", "enabled"),
+        }
+    )
+    assert security_rule(**WANTED_SECURITY).apply(workspace) == []
+    assert workspace.settings["security_and_analysis"] == security_state("enabled", "enabled")
+
+
+@pytest.mark.parametrize("visibility", ["private", "internal"])
+def test_security_skips_non_public_repositories(make_workspace, visibility) -> None:
+    workspace = make_workspace(settings={"visibility": visibility})
+    assert security_rule(**WANTED_SECURITY).apply(workspace) == []
+    assert workspace.settings == {"visibility": visibility}
+
+
+def test_security_reports_unreadable_field(make_workspace) -> None:
+    workspace = make_workspace(settings={"visibility": "public"})
+    assert security_rule(**WANTED_SECURITY).apply(workspace) == [
+        Finding(
+            "rs",
+            "setting security_and_analysis is not readable (the token needs Administration access)",
+            fixable=False,
+        )
+    ]
+    assert workspace.settings == {"visibility": "public"}
+
+
+def test_security_reports_unreadable_key(make_workspace) -> None:
+    workspace = make_workspace(
+        settings={
+            "visibility": "public",
+            "security_and_analysis": {"secret_scanning": {"status": "enabled"}},
+        }
+    )
+    assert security_rule(**WANTED_SECURITY).apply(workspace) == [
+        Finding(
+            "rs",
+            "setting security_and_analysis.secret_scanning_push_protection is not readable "
+            "(the token needs Administration access)",
+            fixable=False,
+        )
+    ]

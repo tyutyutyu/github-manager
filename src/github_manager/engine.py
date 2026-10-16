@@ -91,21 +91,22 @@ class RemoteWorkspace:
         self._written[path] = content
 
     def setting(self, name: str) -> Any:
-        if name in self._changed_settings:
-            return self._changed_settings[name]
         if self._settings is None:
             self._settings = self._api.repo_settings(self._repo)
-        return self._settings.get(name)
+        original = self._settings.get(name)
+        if name not in self._changed_settings:
+            return original
+        return _merged(original, self._changed_settings[name])
 
     def change_setting(self, name: str, value: Any) -> None:
-        self._changed_settings[name] = value
+        self._changed_settings[name] = _merged(self._changed_settings.get(name), value)
 
     def setting_changes(self) -> dict[str, Any]:
         current = self._settings or {}
         return {
             name: value
             for name, value in sorted(self._changed_settings.items())
-            if current.get(name) != value
+            if _differs(current.get(name), value)
         }
 
     def changes(self) -> dict[str, str]:
@@ -119,6 +120,22 @@ class RemoteWorkspace:
         before = (self.original(path) or "").splitlines(keepends=True)
         after = self._written[path].splitlines(keepends=True)
         return "".join(difflib.unified_diff(before, after, f"a/{path}", f"b/{path}"))
+
+
+def _merged(base: Any, value: Any) -> Any:
+    """`value` on top of `base`; nested dicts (e.g. `security_and_analysis`) merge per key."""
+    if isinstance(base, dict) and isinstance(value, dict):
+        return {**base, **value}
+    return value
+
+
+def _differs(current: Any, wanted: Any) -> bool:
+    """Value inequality; for a nested dict only the requested keys count."""
+    if isinstance(wanted, dict):
+        if not isinstance(current, dict):
+            return True
+        return any(_differs(current.get(key), value) for key, value in wanted.items())
+    return current != wanted
 
 
 def select_repos(

@@ -76,6 +76,9 @@ class Options:
     def table(self, key: str, default: Any = None) -> dict[str, Any]:
         return dict(self._take(key, dict, default))
 
+    def has(self, key: str) -> bool:
+        return key in self._raw
+
     def finish(self) -> None:
         if self._raw:
             raise ValueError(f"unknown keys: {', '.join(sorted(self._raw))}")
@@ -373,21 +376,33 @@ REPO_BOOL_SETTINGS = frozenset(
 )
 
 
+# Security features of `security_and_analysis` that a public repository may require.
+SECURITY_SETTINGS = frozenset({"secret_scanning", "secret_scanning_push_protection"})
+SECURITY_STATES = frozenset({"enabled", "disabled"})
+NOT_READABLE = "is not readable (the token needs Administration access)"
+
+
 @dataclass(frozen=True, kw_only=True)
 class RepoSettings(Rule):
     """The repository settings must have the values in `settings`.
 
+    `security_and_analysis` additionally requires the secret scanning features, on public
+    repositories only (they are paid features on private ones, which are skipped).
     Fixes are applied to the repository directly (through PyGithub), not by pull request.
     """
 
     type_name: ClassVar[str] = "repo_settings"
 
-    settings: dict[str, bool]
+    settings: dict[str, bool] = field(default_factory=dict)
+    security_and_analysis: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
-        settings = options.table("settings", REQUIRED)
-        if not settings:
+        if not options.has("settings") and not options.has("security_and_analysis"):
+            raise ValueError("missing required key 'settings' or 'security_and_analysis'")
+        settings = options.table("settings", {})
+        security = options.table("security_and_analysis", {})
+        if not settings and not security:
             raise ValueError("'settings' must not be empty")
         unknown = sorted(set(settings) - REPO_BOOL_SETTINGS)
         if unknown:
@@ -395,7 +410,15 @@ class RepoSettings(Rule):
         not_bool = sorted(name for name, value in settings.items() if not isinstance(value, bool))
         if not_bool:
             raise ValueError(f"settings must be true or false: {', '.join(not_bool)}")
-        return cls(settings=settings, **common)
+        unknown = sorted(set(security) - SECURITY_SETTINGS)
+        if unknown:
+            raise ValueError(f"unknown security_and_analysis settings: {', '.join(unknown)}")
+        invalid = sorted(name for name, value in security.items() if value not in SECURITY_STATES)
+        if invalid:
+            raise ValueError(
+                f"security_and_analysis values must be enabled or disabled: {', '.join(invalid)}"
+            )
+        return cls(settings=settings, security_and_analysis=security, **common)
 
     def apply(self, workspace: Workspace) -> list[Finding]:
         findings = []
@@ -404,12 +427,38 @@ class RepoSettings(Rule):
             if current == wanted:
                 continue
             if current is None:
-                message = f"setting {name} is not readable (the token needs Administration access)"
+                message = f"setting {name} {NOT_READABLE}"
                 findings.append(Finding(self.id, message, fixable=False))
                 continue
             workspace.change_setting(name, wanted)
             message = f"setting {name} is {json.dumps(current)}, expected {json.dumps(wanted)}"
             findings.append(Finding(self.id, message, setting=True))
+        if self.security_and_analysis and workspace.setting("visibility") == "public":
+            findings.extend(self._apply_security(workspace))
+        return findings
+
+    def _apply_security(self, workspace: Workspace) -> list[Finding]:
+        current = workspace.setting("security_and_analysis")
+        if not isinstance(current, dict):
+            message = f"setting security_and_analysis {NOT_READABLE}"
+            return [Finding(self.id, message, fixable=False)]
+        findings = []
+        payload = {}
+        for name, wanted in self.security_and_analysis.items():
+            entry = current.get(name)
+            status = entry.get("status") if isinstance(entry, dict) else None
+            if status == wanted:
+                continue
+            label = f"security_and_analysis.{name}"
+            if status is None:
+                message = f"setting {label} {NOT_READABLE}"
+                findings.append(Finding(self.id, message, fixable=False))
+                continue
+            payload[name] = {"status": wanted}
+            message = f"setting {label} is {json.dumps(status)}, expected {json.dumps(wanted)}"
+            findings.append(Finding(self.id, message, setting=True))
+        if payload:
+            workspace.change_setting("security_and_analysis", payload)
         return findings
 
 

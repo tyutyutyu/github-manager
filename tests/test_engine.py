@@ -202,3 +202,97 @@ def test_fix_applies_settings_next_to_pull_request(fake_github) -> None:
         "### Repository settings (applied directly)\n"
         "- rs: setting delete_branch_on_merge is false, expected true"
     ) in body
+
+
+SECURITY_RULE = RepoSettings.from_options(
+    {
+        "id": "rs",
+        "security_and_analysis": {
+            "secret_scanning": "enabled",
+            "secret_scanning_push_protection": "enabled",
+        },
+    },
+    Path(),
+)
+DISABLED = {
+    "visibility": "public",
+    "security_and_analysis": {
+        "secret_scanning": {"status": "disabled"},
+        "secret_scanning_push_protection": {"status": "disabled"},
+    },
+}
+
+
+def disabled_security() -> dict:
+    return {
+        "visibility": "public",
+        "security_and_analysis": {
+            "secret_scanning": {"status": "disabled"},
+            "secret_scanning_push_protection": {"status": "disabled"},
+        },
+    }
+
+
+def test_check_does_not_change_security_settings(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[SECURITY_RULE])
+    name = fake_github.add_repo("app", {}, settings=DISABLED)
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+    assert report.outcome is Outcome.NEEDS_FIX
+    assert len(report.findings) == 2
+    assert fake_github.repos[name].settings == DISABLED
+    assert fake_github.calls == []
+
+
+def test_fix_updates_security_settings_in_one_call(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[SECURITY_RULE])
+    name = fake_github.add_repo("app", {}, settings=DISABLED)
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert fake_github.calls == ["settings ['security_and_analysis']"]
+    assert fake_github.repos[name].settings["security_and_analysis"] == {
+        "secret_scanning": {"status": "enabled"},
+        "secret_scanning_push_protection": {"status": "enabled"},
+    }
+
+    again = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert again.outcome is Outcome.COMPLIANT
+    assert fake_github.calls == ["settings ['security_and_analysis']"]
+
+
+def test_fix_merges_security_settings_of_several_rules(fake_github) -> None:
+    rules = [
+        RepoSettings.from_options(
+            {"id": rule_id, "security_and_analysis": {key: "enabled"}}, Path()
+        )
+        for rule_id, key in [
+            ("rs1", "secret_scanning"),
+            ("rs2", "secret_scanning_push_protection"),
+        ]
+    ]
+    config = Config(owners=["owner"], rules=rules)
+    name = fake_github.add_repo("app", {}, settings=disabled_security())
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert all(finding.setting for finding in report.findings)
+    assert len(report.findings) == 2
+    assert fake_github.calls == ["settings ['security_and_analysis']"]
+    assert fake_github.repos[name].settings["security_and_analysis"] == {
+        "secret_scanning": {"status": "enabled"},
+        "secret_scanning_push_protection": {"status": "enabled"},
+    }
+
+    again = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert again.outcome is Outcome.COMPLIANT
+    assert fake_github.calls == ["settings ['security_and_analysis']"]
+
+
+def test_fix_leaves_private_repository_security_alone(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[SECURITY_RULE])
+    fake_github.add_repo("app", {}, settings={"visibility": "private"})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.COMPLIANT
+    assert fake_github.calls == []

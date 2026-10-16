@@ -252,6 +252,19 @@ def test_repo_settings_use_pygithub(monkeypatch: pytest.MonkeyPatch, client: Git
     assert requested == ["o/r", "o/r"]
 
 
+def test_update_repo_settings_passes_security_and_analysis(
+    monkeypatch: pytest.MonkeyPatch, client: GitHub
+) -> None:
+    repository = FakeRepository({"full_name": "o/r"})
+    monkeypatch.setattr(client._client, "get_repo", lambda name: repository)
+    payload = {
+        "secret_scanning": {"status": "enabled"},
+        "secret_scanning_push_protection": {"status": "enabled"},
+    }
+    client.update_repo_settings("o/r", {"security_and_analysis": payload})
+    assert repository.edits == [{"security_and_analysis": payload}]
+
+
 @pytest.mark.parametrize(
     "data", [{"message": "Resource not accessible"}, "Resource not accessible"]
 )

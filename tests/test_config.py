@@ -28,6 +28,10 @@ def test_repository_config_file_is_valid() -> None:
         "allow_update_branch": True,
         "has_wiki": False,
     }
+    assert repo_settings.security_and_analysis == {
+        "secret_scanning": "enabled",
+        "secret_scanning_push_protection": "enabled",
+    }
 
 
 def test_defaults_apply(tmp_path: Path) -> None:
