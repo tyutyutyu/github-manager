@@ -40,10 +40,17 @@ Exit codes: `0` compliant (or every finding has a pull request), `1` findings re
 | `renovate_preset` | the Renovate config extends `preset` | rewrites only the `extends` array (drops `remove_extends`), or creates `renovate.json` |
 | `file_sync` | `path` equals the template file `source` | overwrites the file |
 | `repo_settings` | the repository settings in `settings` (booleans accepted by PyGithub's `Repository.edit`, e.g. `delete_branch_on_merge`) have the given values; optional `security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }` (only these two keys, `"enabled"` or `"disabled"`) is checked on **public repositories only** (private and internal ones are skipped: the features are paid there) | sets them directly on the repository, not by pull request (the security part in one request) |
+| `repo_ruleset` | the default branch has a ruleset named `github-manager: <id>` that forbids deletion and force pushes and requires a pull request (0 approvals, conversations resolved), with no bypass actors; optional `required_status_checks = { "<glob>" = ["<check>", ...] }` (globs match the repo name or `OWNER/NAME`; a repository gets the sorted union of all matching globs' checks, none if nothing matches) and `strict_required_status_checks` (default `false`) | creates or replaces that ruleset directly on the repository, not by pull request; other (manual, organization) rulesets are never touched. A private repository on the GitHub Free plan has no rulesets: reported as *manual* |
 | `branch_strategy` | the default branch is `default_branch` (default `main`) and none of `forbidden_branches` (default `["develop"]`) exists | none: reported as *manual* |
 
 Not fixed automatically (reported as *manual*): several Renovate configs in one repo,
-invalid JSON, `.json5` configs, and settings the token cannot read.
+invalid JSON, `.json5` configs, settings the token cannot read, several rulesets with
+the same managed name, and rulesets on a private repository of the GitHub Free plan.
+
+`repo_ruleset` has no bypass actors: once it is applied, nobody (including the owner)
+can push to a default branch directly, only a pull request can change it. Check names in
+`required_status_checks` must be checks that report on the default branch, otherwise
+no pull request can be merged.
 
 ## Scheduled run
 
@@ -72,7 +79,7 @@ Fine-grained tokens → Generate new token*:
   | --- | --- | --- |
   | Contents | Read and write | reading files, creating the compliance branch and commit |
   | Pull requests | Read and write | opening, updating and closing the pull request |
-  | Administration | Read and write | `repo_settings` (e.g. `delete_branch_on_merge`) |
+  | Administration | Read and write | `repo_settings` (e.g. `delete_branch_on_merge`) and `repo_ruleset` (reading and writing repository rulesets) |
   | Metadata | Read-only | always required (selected automatically) |
   | Workflows | Read and write | only if a rule edits files under `.github/workflows` |
 

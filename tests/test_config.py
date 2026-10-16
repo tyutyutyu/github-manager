@@ -3,7 +3,13 @@ from pathlib import Path
 import pytest
 
 from github_manager.config import ConfigError, load_config, parse_config
-from github_manager.rules import BranchStrategy, RenovatePreset, RepoSettings, RequiredLines
+from github_manager.rules import (
+    BranchStrategy,
+    RenovatePreset,
+    RepoRuleset,
+    RepoSettings,
+    RequiredLines,
+)
 
 RULES = [
     {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": [".env"]},
@@ -19,8 +25,9 @@ def test_repository_config_file_is_valid() -> None:
         RequiredLines,
         BranchStrategy,
         RepoSettings,
+        RepoRuleset,
     ]
-    repo_settings = config.rules[-1]
+    repo_settings = config.rules[3]
     assert isinstance(repo_settings, RepoSettings)
     assert repo_settings.settings == {
         "delete_branch_on_merge": True,
@@ -32,6 +39,15 @@ def test_repository_config_file_is_valid() -> None:
         "secret_scanning": "enabled",
         "secret_scanning_push_protection": "enabled",
     }
+    ruleset = config.rules[4]
+    assert isinstance(ruleset, RepoRuleset)
+    assert ruleset.id == "default-branch-ruleset"
+    assert ruleset.required_status_checks == {
+        "tyutyutyu/github-manager": ["verify"],
+        "tyutyutyu-org/ph_toolbox": ["verify"],
+        "tyutyutyu-org/youtube-mirror": ["test"],
+    }
+    assert not ruleset.strict_required_status_checks
 
 
 def test_defaults_apply(tmp_path: Path) -> None:

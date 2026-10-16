@@ -5,7 +5,13 @@ import pytest
 from github_manager.config import Config
 from github_manager.engine import Outcome, process_repo, select_repos
 from github_manager.github import GitHubError
-from github_manager.rules import BranchStrategy, RenovatePreset, RepoSettings, RequiredLines
+from github_manager.rules import (
+    BranchStrategy,
+    RenovatePreset,
+    RepoRuleset,
+    RepoSettings,
+    RequiredLines,
+)
 
 RULE = RequiredLines.from_options(
     {"id": "gi", "path": ".gitignore", "lines": [".env"], "exclude": ["skip-rule"]}, Path()
@@ -14,6 +20,10 @@ CONFIG = Config(owners=["owner"], rules=[RULE], exclude=["legacy-*"])
 SETTINGS_RULE = RepoSettings.from_options(
     {"id": "rs", "settings": {"delete_branch_on_merge": True}}, Path()
 )
+RULESET_RULE = RepoRuleset.from_options(
+    {"id": "dr", "required_status_checks": {"owner/app": ["verify"]}}, Path()
+)
+RULESET_NAME = "github-manager: dr"
 
 
 def repo_named(api, name):
@@ -296,3 +306,158 @@ def test_fix_leaves_private_repository_security_alone(fake_github) -> None:
     report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
     assert report.outcome is Outcome.COMPLIANT
     assert fake_github.calls == []
+
+
+# --- repo_ruleset ------------------------------------------------------------
+
+
+def ruleset_config(*rules) -> Config:
+    return Config(owners=["owner"], rules=list(rules) or [RULESET_RULE])
+
+
+def test_check_does_not_write_rulesets(fake_github) -> None:
+    name = fake_github.add_repo("app", {})
+
+    report = process_repo(fake_github, ruleset_config(), repo_named(fake_github, "app"), fix=False)
+    assert report.outcome is Outcome.NEEDS_FIX
+    assert [(f.message, f.fixable) for f in report.findings] == [
+        (f"ruleset {RULESET_NAME} is missing", True)
+    ]
+    assert fake_github.repos[name].rulesets == {}
+    assert fake_github.calls == []
+
+
+def test_fix_creates_ruleset_then_second_run_is_compliant(fake_github) -> None:
+    config = ruleset_config()
+    name = fake_github.add_repo("app", {})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert fake_github.calls == [f"create ruleset {RULESET_NAME}"]
+    [ruleset] = fake_github.repos[name].rulesets.values()
+    assert ruleset["name"] == RULESET_NAME
+    assert ruleset["bypass_actors"] == []
+    assert [rule["type"] for rule in ruleset["rules"]] == [
+        "deletion",
+        "non_fast_forward",
+        "pull_request",
+        "required_status_checks",
+    ]
+
+    again = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert again.outcome is Outcome.COMPLIANT
+    assert again.findings == []
+    assert fake_github.calls == [f"create ruleset {RULESET_NAME}"]
+
+
+def test_fix_updates_outdated_ruleset_and_keeps_manual_ones(fake_github) -> None:
+    config = ruleset_config()
+    name = fake_github.add_repo("app", {})
+    payload = RULESET_RULE.payload(name)
+    manual = fake_github.add_ruleset(name, {**payload, "name": "Protect main"})
+    manual_before = fake_github.get_ruleset(name, manual)
+    outdated = fake_github.add_ruleset(name, {**payload, "enforcement": "disabled"})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert [f.message for f in report.findings] == [f"ruleset {RULESET_NAME} is outdated"]
+    assert fake_github.calls == [f"update ruleset {outdated}"]
+    assert fake_github.repos[name].rulesets[outdated]["enforcement"] == "active"
+    assert fake_github.get_ruleset(name, manual) == manual_before
+
+    again = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert again.outcome is Outcome.COMPLIANT
+
+
+def test_ruleset_with_server_defaults_is_compliant(fake_github) -> None:
+    name = fake_github.add_repo("app", {})
+    fake_github.add_ruleset(name, RULESET_RULE.payload(name))
+
+    report = process_repo(fake_github, ruleset_config(), repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.COMPLIANT
+    assert fake_github.calls == []
+
+
+def test_ruleset_unavailable_and_duplicate_are_manual_not_errors(fake_github) -> None:
+    free = fake_github.add_repo("free", {}, rulesets_available=False)
+    twice = fake_github.add_repo("twice", {})
+    payload = RULESET_RULE.payload(twice)
+    fake_github.add_ruleset(twice, payload)
+    fake_github.add_ruleset(twice, payload)
+
+    for name in ("free", "twice"):
+        report = process_repo(
+            fake_github, ruleset_config(), repo_named(fake_github, name), fix=True
+        )
+        assert report.outcome is Outcome.NEEDS_FIX
+        assert [f.fixable for f in report.findings] == [False]
+    assert fake_github.calls == []
+    assert fake_github.repos[free].rulesets == {}
+
+
+def test_ruleset_write_is_verified_by_reading_back(fake_github) -> None:
+    name = fake_github.add_repo("app", {})
+    fake_github.add_ruleset(name, {**RULESET_RULE.payload(name), "enforcement": "disabled"})
+    fake_github.repos[name].drop_ruleset_writes = True
+
+    report = process_repo(fake_github, ruleset_config(), repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.ERROR
+    assert "differs from the request after saving" in report.detail
+
+
+def test_ruleset_api_errors_are_reported(fake_github) -> None:
+    fake_github.add_repo("app", {})
+
+    def forbidden(repo):
+        raise GitHubError("GET rulesets: HTTP 403: Resource not accessible", 403)
+
+    fake_github.list_rulesets = forbidden
+    report = process_repo(fake_github, ruleset_config(), repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.ERROR
+
+
+def test_ruleset_change_goes_to_settings_section_not_commit(fake_github) -> None:
+    config = ruleset_config(RULE, RULESET_RULE)
+    name = fake_github.add_repo("app", {})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.PR_CREATED
+    assert f"create ruleset {RULESET_NAME}" in fake_github.calls
+    assert "commit ['.gitignore']" in fake_github.calls
+    _, body, _ = fake_github.pulls[name][1]
+    assert "### Fixed\n- gi: .gitignore: managed block is missing\n\n" in body
+    assert (
+        f"### Repository settings (applied directly)\n- dr: ruleset {RULESET_NAME} is missing"
+        in body
+    )
+    assert "ruleset" not in body.split("### Repository settings")[0]
+
+
+def test_ruleset_and_settings_together_do_not_open_a_pull_request(fake_github) -> None:
+    config = ruleset_config(SETTINGS_RULE, RULESET_RULE)
+    name = fake_github.add_repo("app", {}, settings={"delete_branch_on_merge": False})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert fake_github.pulls[name] == {}
+    assert fake_github.calls == [
+        "settings ['delete_branch_on_merge']",
+        f"create ruleset {RULESET_NAME}",
+    ]
+
+
+def test_several_ruleset_rules_share_one_listing(fake_github) -> None:
+    second = RepoRuleset.from_options({"id": "other"}, Path())
+    name = fake_github.add_repo("app", {})
+    listed: list[str] = []
+    original = fake_github.list_rulesets
+    fake_github.list_rulesets = lambda repo: listed.append(repo) or original(repo)
+
+    config = ruleset_config(second, RULESET_RULE)
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert listed == [name]
+    assert fake_github.calls == [
+        "create ruleset github-manager: dr",
+        "create ruleset github-manager: other",
+    ]

@@ -1,9 +1,10 @@
 ---
 id: TASK-2
 title: 'Új repo_ruleset szabálytípus: központi branch ruleset a default ágon'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14 21:39'
+updated_date: '2026-10-16 15:48'
 labels: []
 dependencies:
   - TASK-1
@@ -141,19 +142,35 @@ Kódbeli kiindulópontok:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `repo_ruleset` típus szerepel a `RULE_TYPES`-ban; a `required_status_checks` (glob → nem üres check-lista tábla) és a `strict_required_status_checks` (bool) opciót validálja, ismeretlen kulcsra, üres listára vagy üres stringre konfigurációs hibát ad
-- [ ] #2 `check` módban egy hiányzó vagy eltérő `github-manager: <rule id>` nevű ruleset fixable findinget ad, és semmilyen írás nem történik GitHubon
-- [ ] #3 `fix` módban a hiányzó ruleset `POST`-tal létrejön, az eltérő `PUT`-tal frissül a teljes payloadra (deletion, non_fast_forward, pull_request 0 jóváhagyással és kötelező szálfeloldással, bypass nélkül, `~DEFAULT_BRANCH`), és a visszaolvasott állapot egyezik
-- [ ] #4 Egy repó csak akkor kap `required_status_checks` szabályt, ha a neve illeszkedik a konfigurált mintákra; több illeszkedésnél a check-nevek rendezett, duplikátummentes uniója kerül bele
-- [ ] #5 Egy naprakész kezelt ruleset, amelynek szerveroldali válasza extra alapértelmezett mezőket (pl. `required_reviewers`, `integration_id`) is tartalmaz, `compliant`; a `fix` utáni második futás nem jelez eltérést
-- [ ] #6 A nem github-manager nevű (kézi) rulesetek változatlanok maradnak
-- [ ] #7 A Free csomagos privát repó 403-as válasza és a több azonos nevű kezelt ruleset `[manual]` finding, nem `ERROR`; minden más API-hiba `ERROR`
-- [ ] #8 Csak ruleset- vagy settings-változásnál nem nyílik PR; ha PR is nyílik, a ruleset-változás a „Repository settings (applied directly)” szakaszban szerepel, a commit üzenetben nem
-- [ ] #9 A `github-manager.toml` tartalmazza a központi szabályt a github-manager, ph_toolbox (`verify`) és youtube-mirror (`test`) check-nevekkel, a README szabálytípus-táblázata és a „Tokens” szakasza leírja az új típust
+- [x] #1 A `repo_ruleset` típus szerepel a `RULE_TYPES`-ban; a `required_status_checks` (glob → nem üres check-lista tábla) és a `strict_required_status_checks` (bool) opciót validálja, ismeretlen kulcsra, üres listára vagy üres stringre konfigurációs hibát ad
+- [x] #2 `check` módban egy hiányzó vagy eltérő `github-manager: <rule id>` nevű ruleset fixable findinget ad, és semmilyen írás nem történik GitHubon
+- [x] #3 `fix` módban a hiányzó ruleset `POST`-tal létrejön, az eltérő `PUT`-tal frissül a teljes payloadra (deletion, non_fast_forward, pull_request 0 jóváhagyással és kötelező szálfeloldással, bypass nélkül, `~DEFAULT_BRANCH`), és a visszaolvasott állapot egyezik
+- [x] #4 Egy repó csak akkor kap `required_status_checks` szabályt, ha a neve illeszkedik a konfigurált mintákra; több illeszkedésnél a check-nevek rendezett, duplikátummentes uniója kerül bele
+- [x] #5 Egy naprakész kezelt ruleset, amelynek szerveroldali válasza extra alapértelmezett mezőket (pl. `required_reviewers`, `integration_id`) is tartalmaz, `compliant`; a `fix` utáni második futás nem jelez eltérést
+- [x] #6 A nem github-manager nevű (kézi) rulesetek változatlanok maradnak
+- [x] #7 A Free csomagos privát repó 403-as válasza és a több azonos nevű kezelt ruleset `[manual]` finding, nem `ERROR`; minden más API-hiba `ERROR`
+- [x] #8 Csak ruleset- vagy settings-változásnál nem nyílik PR; ha PR is nyílik, a ruleset-változás a „Repository settings (applied directly)” szakaszban szerepel, a commit üzenetben nem
+- [x] #9 A `github-manager.toml` tartalmazza a központi szabályt a github-manager, ph_toolbox (`verify`) és youtube-mirror (`test`) check-nevekkel, a README szabálytípus-táblázata és a „Tokens” szakasza leírja az új típust
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 A `task verify` sikeres, az új kód branch-lefedettsége a tesztekben teljes
-- [ ] #2 Az élesítés (első `fix` futás) előtt a felhasználó tudomásul vette, hogy a default ágakra bypass nélkül csak PR-en át lehet bejutni
+- [x] #1 A `task verify` sikeres, az új kód branch-lefedettsége a tesztekben teljes
+- [x] #2 Az élesítés (első `fix` futás) előtt a felhasználó tudomásul vette, hogy a default ágakra bypass nélkül csak PR-en át lehet bejutni
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-2-uj-repo-ruleset-szabalytipus-kozponti-branch-rul.
+
+Validation 2026-10-16: task verify steps passed (155 tests, 99% coverage, ruff/ty/deptry/audit/build). DoD #2 (user acknowledgement of no-bypass before first fix run) still open.
+
+User confirmed (Igen) on 2026-10-16 that default branches will accept changes only via pull requests with no bypass, before the first fix run.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the repo_ruleset rule type: managed 'github-manager: <id>' branch ruleset on the default branch (deletion, non_fast_forward, pull_request, optional per-repo required status checks), created/updated directly with read-back verification after the PR sync; REST methods in GitHub, fakes, README and github-manager.toml updated. Verified with the full test suite (155 passed, 99.36% coverage) and the task verify steps (format, lint, ty, deptry, audit, build); the user acknowledged the no-bypass consequence.
+<!-- SECTION:FINAL_SUMMARY:END -->
