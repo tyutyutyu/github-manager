@@ -103,7 +103,7 @@ id = "repo-settings"
 type = "repo_settings"
 # Repository settings: applied directly through the GitHub API (PyGithub), not by pull
 # request. Needs a token with Administration: read/write.
-settings = { delete_branch_on_merge = true }
+settings = { delete_branch_on_merge = true, allow_auto_merge = true, allow_update_branch = true, has_wiki = false }
 exclude = []
 
 # Example: keep a file identical to a template stored in this repository.
