@@ -9,7 +9,6 @@ exclude = [
     "tyutyutyu-org/brand-site-data",
     "tyutyutyu-org/brand-site-ui",
     "tyutyutyu-org/daily-loop",
-    "tyutyutyu-org/easy-github",
     "tyutyutyu-org/github-copilot-price-monitor",
     "tyutyutyu-org/knowledge-miner",
     "tyutyutyu-org/proxy-manager",
@@ -23,12 +22,10 @@ exclude = [
     "tyutyutyu/docker-image-stats",
     "tyutyutyu/dodu",
     "tyutyutyu/finance_assistant",
-    "tyutyutyu/home-server-management",
     "tyutyutyu/i3-config",
     "tyutyutyu/image-viewer",
     "tyutyutyu/java-feeds",
     "tyutyutyu/java-web-frameworks",
-    "tyutyutyu/maven-mcp",
     "tyutyutyu/mese-app",
     "tyutyutyu/mese-doboz",
     "tyutyutyu/msps",
@@ -77,17 +74,9 @@ type = "required_lines"
 path = ".gitignore"
 # Managed block between "# >>> github-manager: gitignore-baseline" and
 # "# <<< github-manager: gitignore-baseline"; it is replaced as a whole.
-lines = [
-    ".DS_Store",
-    ".idea/",
-    ".env",
-    ".claude/",
-    "!.claude/skills/",
-]
+lines = [".DS_Store", ".idea/", ".env", ".claude/", "!.claude/skills/"]
 # Deleted from the rest of the file.
-remove_lines = [
-    ".claude/autoharness/",
-]
+remove_lines = [".claude/autoharness/"]
 exclude = []
 
 [[rules]]
