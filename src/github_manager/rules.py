@@ -14,6 +14,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, Self
 
+import yaml
+
 
 class Workspace(Protocol):
     @property
@@ -27,6 +29,8 @@ class Workspace(Protocol):
     def read(self, path: str) -> str | None: ...
 
     def write(self, path: str, content: str) -> None: ...
+
+    def paths(self, prefix: str) -> list[str] | None: ...
 
     def setting(self, name: str) -> Any: ...
 
@@ -80,6 +84,17 @@ class Options:
         if not all(isinstance(item, str) and item for item in value):
             raise ValueError(f"{key!r} must be a list of non-empty strings")
         return list(value)
+
+    def text_lists(self, key: str, default: Any = None) -> list[list[str]]:
+        value = self._take(key, list, default)
+        if not all(
+            isinstance(item, list)
+            and item
+            and all(isinstance(label, str) and label for label in item)
+            for item in value
+        ):
+            raise ValueError(f"{key!r} must be a list of non-empty lists of non-empty strings")
+        return [list(item) for item in value]
 
     def flag(self, key: str, default: bool) -> bool:
         return self._take(key, bool, default)
@@ -666,6 +681,141 @@ class RepoVisibility(Rule):
         return [Finding(self.id, message, fixable=False)]
 
 
+WORKFLOWS_DIR = ".github/workflows/"
+SELF_HOSTED = "self-hosted"
+YAML_STR = "tag:yaml.org,2002:str"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SelfHostedRunners(Rule):
+    """Every job of a private or internal repository must run on an allowed self-hosted runner.
+
+    `allowed_runs_on` lists the accepted label sets; a job's `runs-on` must equal one of them
+    exactly (as a set, ignoring case). Jobs whose runner cannot be decided statically
+    (expressions, matrices, mappings, external reusable workflows) are reported too, and so are
+    workflow files that cannot be parsed. Public repositories are not checked. Nothing is
+    written: every finding needs manual action.
+    """
+
+    type_name: ClassVar[str] = "self_hosted_runners"
+
+    allowed_runs_on: list[list[str]]
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        allowed = options.text_lists("allowed_runs_on", REQUIRED)
+        if not allowed:
+            raise ValueError("'allowed_runs_on' must not be empty")
+        seen: set[frozenset[str]] = set()
+        for labels in allowed:
+            folded = frozenset(label.casefold() for label in labels)
+            if SELF_HOSTED not in folded:
+                raise ValueError(
+                    f"'allowed_runs_on' set {json.dumps(labels)} must contain {SELF_HOSTED!r}"
+                )
+            if folded in seen:
+                raise ValueError(f"duplicate 'allowed_runs_on' set: {json.dumps(labels)}")
+            seen.add(folded)
+        return cls(allowed_runs_on=allowed, **common)
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        visibility = workspace.setting("visibility")
+        if visibility is None:
+            return [Finding(self.id, f"setting visibility {NOT_READABLE}", fixable=False)]
+        if visibility == "public":
+            return []
+        listed = workspace.paths(WORKFLOWS_DIR)
+        if listed is None:
+            message = f"{WORKFLOWS_DIR}: the workflow files cannot be listed"
+            return [Finding(self.id, message, fixable=False)]
+        files = [
+            path
+            for path in listed
+            if path.endswith((".yml", ".yaml")) and "/" not in path[len(WORKFLOWS_DIR) :]
+        ]
+        return [
+            Finding(self.id, f"{path}: {problem}", fixable=False)
+            for path in files
+            for problem in self._problems(workspace.read(path))
+        ]
+
+    def _problems(self, text: str | None) -> list[str]:
+        if text is None:
+            return ["the file is not readable"]
+        try:
+            root = yaml.compose(text, Loader=yaml.SafeLoader)
+        except yaml.YAMLError as exc:
+            problem = getattr(exc, "problem", None) or "invalid YAML"
+            return [f"invalid YAML ({problem})"]
+        top = _mapping(root)
+        jobs = _mapping(top.get("jobs")) if top is not None else None
+        if jobs is None:
+            return ["no 'jobs' mapping"]
+        problems = []
+        for name, job in jobs.items():
+            problem = self._job_problem(job)
+            if problem:
+                problems.append(f"job {name}: {problem}")
+        return problems
+
+    def _job_problem(self, job: yaml.Node) -> str | None:
+        fields = _mapping(job)
+        if fields is None:
+            return "is not a mapping"
+        runs_on = fields.get("runs-on")
+        if runs_on is None:
+            uses = fields.get("uses")
+            if _text(uses) is None:
+                return "has neither 'runs-on' nor 'uses'"
+            if (_text(uses) or "").startswith("./"):
+                return None
+            return f"calls {json.dumps(_text(uses))} without 'runs-on' (check the runner manually)"
+        allowed = " or ".join(json.dumps(labels) for labels in self.allowed_runs_on)
+        if _text(runs_on) is not None:
+            labels = [_text(runs_on) or ""]
+        elif isinstance(runs_on, yaml.SequenceNode):
+            texts = [_text(item) for item in runs_on.value]
+            if any(text is None for text in texts):
+                return (
+                    f"runs-on {_json(runs_on)} has a list item that is not a string"
+                    f" (check manually; allowed: {allowed})"
+                )
+            labels = [text for text in texts if text is not None]
+        else:
+            return (
+                f"runs-on {_json(runs_on)} must be a string or a list of strings"
+                f" (check manually; allowed: {allowed})"
+            )
+        actual = json.dumps(labels)
+        if any("${{" in label for label in labels):
+            return f"runs-on {actual} contains an expression (check manually; allowed: {allowed})"
+        if frozenset(label.casefold() for label in labels) in self._allowed_sets():
+            return None
+        return f"runs-on {actual} is not an allowed self-hosted runner (allowed: {allowed})"
+
+    def _allowed_sets(self) -> set[frozenset[str]]:
+        return {frozenset(label.casefold() for label in labels) for labels in self.allowed_runs_on}
+
+
+def _mapping(node: yaml.Node | None) -> dict[str, yaml.Node] | None:
+    """The scalar-keyed entries of a YAML mapping node, in document order."""
+    if not isinstance(node, yaml.MappingNode):
+        return None
+    return {key.value: value for key, value in node.value if isinstance(key, yaml.ScalarNode)}
+
+
+def _json(node: yaml.Node) -> str:
+    """The JSON rendering of a YAML node's value, for messages."""
+    return json.dumps(yaml.SafeLoader("").construct_document(node), default=str)
+
+
+def _text(node: yaml.Node | None) -> str | None:
+    """The value of a YAML string scalar node; None for any other node."""
+    if isinstance(node, yaml.ScalarNode) and node.tag == YAML_STR:
+        return node.value
+    return None
+
+
 RULE_TYPES: dict[str, type[Rule]] = {
     rule.type_name: rule
     for rule in (
@@ -676,5 +826,6 @@ RULE_TYPES: dict[str, type[Rule]] = {
         RepoSettings,
         RepoRuleset,
         RepoVisibility,
+        SelfHostedRunners,
     )
 }

@@ -19,6 +19,8 @@ class FakeRepo:
     rulesets_available: bool = True
     # True: a ruleset write is accepted but not stored (to test the read-back).
     drop_ruleset_writes: bool = False
+    # False: the file list is not available (tree_paths returns None).
+    tree_listable: bool = True
 
 
 def server_ruleset(
@@ -59,12 +61,14 @@ class FakeGitHub:
         owner: str = "owner",
         settings: dict[str, Any] | None = None,
         rulesets_available: bool = True,
+        tree_listable: bool = True,
     ) -> str:
         full = f"{owner}/{name}"
         repo = FakeRepo(
             Repo(name, full, default_branch, archived, fork),
             settings=settings or {},
             rulesets_available=rulesets_available,
+            tree_listable=tree_listable,
         )
         if files is not None:
             repo.commits["base"] = (None, dict(files))
@@ -117,7 +121,8 @@ class FakeGitHub:
         return ahead, 0 if sha == base else 1, changed
 
     def tree_paths(self, repo: str, sha: str) -> set[str] | None:
-        return set(self.repos[repo].commits[sha][1])
+        state = self.repos[repo]
+        return set(state.commits[sha][1]) if state.tree_listable else None
 
     def read_file(self, repo: str, path: str, ref: str) -> str | None:
         self.calls.append(f"read {path}@{ref}")
@@ -215,12 +220,14 @@ class MemoryWorkspace:
         full_name: str = "owner/app",
         rulesets: list[dict[str, Any]] | None = None,
         rulesets_available: bool = True,
+        listable: bool = True,
     ) -> None:
         self.files = dict(files or {})
         self.full_name = full_name
         # Each item is a full server ruleset.
         self.ruleset_items = rulesets or []
         self.rulesets_available = rulesets_available
+        self.listable = listable
         self.ruleset_changes: list[tuple[str, int | None, dict[str, Any]]] = []
         self.settings = dict(settings or {})
         self.default_branch = default_branch
@@ -234,6 +241,11 @@ class MemoryWorkspace:
 
     def write(self, path: str, content: str) -> None:
         self.files[path] = content
+
+    def paths(self, prefix: str) -> list[str] | None:
+        if not self.listable:
+            return None
+        return sorted(path for path in self.files if path.startswith(prefix))
 
     def setting(self, name: str) -> Any:
         return self.settings.get(name)

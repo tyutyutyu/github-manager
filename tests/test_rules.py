@@ -13,6 +13,7 @@ from github_manager.rules import (
     RepoSettings,
     RepoVisibility,
     RequiredLines,
+    SelfHostedRunners,
     ruleset_matches,
 )
 
@@ -690,3 +691,264 @@ def test_repo_visibility_unreadable_is_manual(make_workspace) -> None:
 def test_repo_visibility_rejects_invalid_options(options, message) -> None:
     with pytest.raises(ValueError, match=message):
         RepoVisibility.from_options({"id": "rv", **options}, Path())
+
+
+# --- self_hosted_runners -----------------------------------------------------
+
+WORKFLOW = ".github/workflows/ci.yml"
+
+
+def runners_rule(allowed=(("self-hosted",),), **options) -> SelfHostedRunners:
+    raw = {"id": "sh", "allowed_runs_on": [list(labels) for labels in allowed], **options}
+    return SelfHostedRunners.from_options(raw, Path())
+
+
+def job_workspace(make_workspace, jobs: str, *, visibility="private", path=WORKFLOW, **options):
+    text = f"name: ci\non: push\njobs:\n{jobs}"
+    return make_workspace(files={path: text}, settings={"visibility": visibility}, **options)
+
+
+def manual(message: str) -> Finding:
+    return Finding("sh", message, fixable=False)
+
+
+@pytest.mark.parametrize("visibility", ["private", "internal"])
+@pytest.mark.parametrize(
+    "runs_on",
+    ["self-hosted", "[self-hosted]", "Self-Hosted", "[SELF-HOSTED, self-hosted]", "'self-hosted'"],
+)
+def test_self_hosted_runners_accept_exact_label_set(make_workspace, visibility, runs_on) -> None:
+    workspace = job_workspace(
+        make_workspace, f"  test:\n    runs-on: {runs_on}\n", visibility=visibility
+    )
+    assert runners_rule().apply(workspace) == []
+
+
+def test_self_hosted_runners_compare_as_sets_against_every_allowed_set(make_workspace) -> None:
+    rule = runners_rule(allowed=[("self-hosted",), ("self-hosted", "GPU")])
+    workspace = job_workspace(
+        make_workspace, "  a:\n    runs-on: [gpu, Self-Hosted]\n  b:\n    runs-on: self-hosted\n"
+    )
+    assert rule.apply(workspace) == []
+
+
+@pytest.mark.parametrize(
+    ("runs_on", "actual"),
+    [
+        ("ubuntu-latest", '["ubuntu-latest"]'),
+        ("windows-latest", '["windows-latest"]'),
+        ("[self-hosted, Linux, X64, zhukov]", '["self-hosted", "Linux", "X64", "zhukov"]'),
+        ("[]", "[]"),
+        ("[ubuntu-latest, self-hosted]", '["ubuntu-latest", "self-hosted"]'),
+    ],
+)
+def test_self_hosted_runners_report_other_label_sets(make_workspace, runs_on, actual) -> None:
+    workspace = job_workspace(make_workspace, f"  test:\n    runs-on: {runs_on}\n")
+    assert runners_rule().apply(workspace) == [
+        manual(
+            f"{WORKFLOW}: job test: runs-on {actual} is not an allowed self-hosted runner "
+            '(allowed: ["self-hosted"])'
+        )
+    ]
+
+
+def test_self_hosted_runners_message_lists_every_allowed_set(make_workspace) -> None:
+    rule = runners_rule(allowed=[("self-hosted",), ("self-hosted", "gpu")])
+    workspace = job_workspace(make_workspace, "  test:\n    runs-on: ubuntu-latest\n")
+    assert rule.apply(workspace)[0].message.endswith(
+        '(allowed: ["self-hosted"] or ["self-hosted", "gpu"])'
+    )
+
+
+def test_self_hosted_runners_report_each_bad_job_once(make_workspace) -> None:
+    jobs = (
+        "  a:\n    runs-on: ubuntu-latest\n"
+        "  b:\n    runs-on: self-hosted\n"
+        "  c:\n    runs-on: macos-latest\n"
+    )
+    findings = runners_rule().apply(job_workspace(make_workspace, jobs))
+    assert [finding.message.split(":")[1] for finding in findings] == [" job a", " job c"]
+    assert not any(finding.fixable for finding in findings)
+
+
+@pytest.mark.parametrize(
+    ("job", "problem"),
+    [
+        (
+            "runs-on: ${{ matrix.os }}",
+            'runs-on ["${{ matrix.os }}"] contains an expression'
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on: [self-hosted, '${{ x }}']",
+            'runs-on ["self-hosted", "${{ x }}"] contains an expression'
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on:\n      group: big",
+            'runs-on {"group": "big"} must be a string or a list of strings'
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on:\n      labels: [self-hosted]",
+            'runs-on {"labels": ["self-hosted"]} must be a string or a list of strings'
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on: [self-hosted, {a: b}]",
+            'runs-on ["self-hosted", {"a": "b"}] has a list item that is not a string'
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on: [self-hosted, 3]",
+            'runs-on ["self-hosted", 3] has a list item that is not a string'
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on: 3",
+            "runs-on 3 must be a string or a list of strings"
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "runs-on:",
+            "runs-on null must be a string or a list of strings"
+            ' (check manually; allowed: ["self-hosted"])',
+        ),
+        (
+            "uses: owner/repo/.github/workflows/x.yml@main",
+            "calls \"owner/repo/.github/workflows/x.yml@main\" without 'runs-on'",
+        ),
+        ("name: nothing", "has neither 'runs-on' nor 'uses'"),
+        ("uses:", "has neither 'runs-on' nor 'uses'"),
+    ],
+)
+def test_self_hosted_runners_report_undecidable_jobs(make_workspace, job, problem) -> None:
+    workspace = job_workspace(make_workspace, f"  test:\n    {job}\n")
+    findings = runners_rule().apply(workspace)
+    assert len(findings) == 1
+    assert not findings[0].fixable
+    assert findings[0].message.startswith(f"{WORKFLOW}: job test: ")
+    assert problem in findings[0].message
+
+
+def test_self_hosted_runners_allow_local_reusable_workflow(make_workspace) -> None:
+    jobs = "  call:\n    uses: ./.github/workflows/ci.yml\n"
+    assert runners_rule().apply(job_workspace(make_workspace, jobs)) == []
+
+
+def test_self_hosted_runners_report_job_that_is_not_a_mapping(make_workspace) -> None:
+    findings = runners_rule().apply(job_workspace(make_workspace, "  test: nope\n"))
+    assert [finding.message for finding in findings] == [f"{WORKFLOW}: job test: is not a mapping"]
+
+
+def test_self_hosted_runners_check_yaml_extension_and_ignore_other_files(make_workspace) -> None:
+    jobs = "  test:\n    runs-on: ubuntu-latest\n"
+    text = f"jobs:\n{jobs}"
+    workspace = make_workspace(
+        files={
+            ".github/workflows/deploy.yaml": text,
+            ".github/workflows/sub/nested.yml": text,
+            ".github/workflows/README.md": text,
+            ".github/workflows/notes.txt": text,
+            ".github/actions/x/action.yml": text,
+            "ci.yml": text,
+        },
+        settings={"visibility": "private"},
+    )
+    findings = runners_rule().apply(workspace)
+    assert [finding.message.split(":")[0] for finding in findings] == [
+        ".github/workflows/deploy.yaml"
+    ]
+
+
+def test_self_hosted_runners_inspect_workflows_in_sorted_order(make_workspace) -> None:
+    text = "jobs:\n  test:\n    runs-on: ubuntu-latest\n"
+    workspace = make_workspace(
+        files={".github/workflows/b.yml": text, ".github/workflows/a.yml": text},
+        settings={"visibility": "internal"},
+    )
+    names = [finding.message.split(":")[0] for finding in runners_rule().apply(workspace)]
+    assert names == [".github/workflows/a.yml", ".github/workflows/b.yml"]
+
+
+def test_self_hosted_runners_skip_public_repository_without_reading(make_workspace) -> None:
+    workspace = job_workspace(
+        make_workspace, "  test:\n    runs-on: ubuntu-latest\n", visibility="public"
+    )
+    workspace.read = lambda path: pytest.fail("public repositories must not be read")
+    workspace.paths = lambda prefix: pytest.fail("public repositories must not be listed")
+    assert runners_rule().apply(workspace) == []
+
+
+def test_self_hosted_runners_unreadable_visibility_is_manual(make_workspace) -> None:
+    workspace = make_workspace(files={WORKFLOW: "jobs: {}"})
+    assert runners_rule().apply(workspace) == [manual(f"setting visibility {NOT_READABLE}")]
+
+
+def test_self_hosted_runners_unlistable_tree_is_manual(make_workspace) -> None:
+    workspace = make_workspace(settings={"visibility": "private"}, listable=False)
+    assert runners_rule().apply(workspace) == [
+        manual(".github/workflows/: the workflow files cannot be listed")
+    ]
+
+
+def test_self_hosted_runners_no_workflows_is_compliant(make_workspace) -> None:
+    workspace = make_workspace(files={"README.md": "x"}, settings={"visibility": "private"})
+    assert runners_rule().apply(workspace) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        ("jobs: [unclosed", "invalid YAML ("),
+        ("a: 1\n---\nb: 2\n", "invalid YAML ("),
+        ("", "no 'jobs' mapping"),
+        ("- a\n- b\n", "no 'jobs' mapping"),
+        ("name: ci\n", "no 'jobs' mapping"),
+        ("jobs: [a, b]\n", "no 'jobs' mapping"),
+        ("jobs:\n", "no 'jobs' mapping"),
+    ],
+)
+def test_self_hosted_runners_report_unusable_workflow_files(make_workspace, text, problem) -> None:
+    workspace = make_workspace(files={WORKFLOW: text}, settings={"visibility": "private"})
+    findings = runners_rule().apply(workspace)
+    assert len(findings) == 1
+    assert not findings[0].fixable
+    assert findings[0].message.startswith(f"{WORKFLOW}: {problem}")
+
+
+def test_self_hosted_runners_report_unreadable_file(make_workspace) -> None:
+    workspace = job_workspace(make_workspace, "  test:\n    runs-on: self-hosted\n")
+    workspace.read = lambda path: None
+    assert runners_rule().apply(workspace) == [manual(f"{WORKFLOW}: the file is not readable")]
+
+
+def test_self_hosted_runners_never_write(make_workspace) -> None:
+    workspace = job_workspace(make_workspace, "  test:\n    runs-on: ubuntu-latest\n")
+    workspace.write = lambda *args: pytest.fail("the rule must not write")
+    workspace.change_setting = lambda *args: pytest.fail("the rule must not change settings")
+    workspace.change_ruleset = lambda *args: pytest.fail("the rule must not change rulesets")
+    assert len(runners_rule().apply(workspace)) == 1
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({}, "missing required key 'allowed_runs_on'"),
+        ({"allowed_runs_on": []}, "'allowed_runs_on' must not be empty"),
+        ({"allowed_runs_on": "self-hosted"}, "'allowed_runs_on' must be of type list"),
+        ({"allowed_runs_on": ["self-hosted"]}, "must be a list of non-empty lists"),
+        ({"allowed_runs_on": [[]]}, "must be a list of non-empty lists"),
+        ({"allowed_runs_on": [[""]]}, "must be a list of non-empty lists"),
+        ({"allowed_runs_on": [["self-hosted", 1]]}, "must be a list of non-empty lists"),
+        ({"allowed_runs_on": [["linux"]]}, "must contain 'self-hosted'"),
+        (
+            {"allowed_runs_on": [["self-hosted", "A"], ["a", "Self-Hosted"]]},
+            r"duplicate 'allowed_runs_on' set: \[\"a\", \"Self-Hosted\"\]",
+        ),
+        ({"allowed_runs_on": [["self-hosted"]], "typo": 1}, "unknown keys: typo"),
+    ],
+)
+def test_self_hosted_runners_reject_invalid_options(options, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        SelfHostedRunners.from_options({"id": "sh", **options}, Path())
