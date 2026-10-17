@@ -3,9 +3,10 @@ id: TASK-5
 title: >-
   Új self_hosted_runners szabálytípus: privát és internal repók csak self-hosted
   runnert használhatnak (jelzés)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-17 19:39'
+updated_date: '2026-10-17 22:11'
 labels: []
 dependencies: []
 references:
@@ -116,18 +117,40 @@ Kódbeli kiindulópontok:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Privát és internal repóban minden `.github/workflows/*.yml|*.yaml` job, amelynek `runs-on` címkehalmaza (kis- és nagybetűtől függetlenül) nem egyezik pontosan egy `allowed_runs_on` halmazzal, pontosan egy `fixable=False` findingot ad, ami megnevezi a fájlt, a jobot, a tényleges és az engedélyezett értéket
-- [ ] #2 Publikus repón nincs finding, és a szabály nem olvas workflow-fájlt; hiányzó `visibility` `NOT_READABLE` findingot ad
-- [ ] #3 `${{ }}` kifejezés, mapping alakú `runs-on`, külső `uses` reusable workflow, hiányzó `runs-on`/`uses`, érvénytelen vagy több dokumentumos YAML, hiányzó `jobs` és nem listázható fa mind `fixable=False` findingot ad; a `uses: ./...` helyi hívás nem ad findingot
-- [ ] #4 A szabály `check` és `fix` módban sem ír fájlt, beállítást vagy rulesetet, és egyedül nem nyit PR-t
-- [ ] #5 Config-hiba (`ConfigError`): hiányzó, üres vagy rossz típusú `allowed_runs_on`, üres címke, `self-hosted` nélküli halmaz, kisbetűsítve duplikált halmaz, ismeretlen kulcs
-- [ ] #6 A `github-manager.toml` utolsó szabálya a `private-self-hosted-runners` (`allowed_runs_on = [["self-hosted"]]`), és a `test_repository_config_file_is_valid` ezt ellenőrzi
-- [ ] #7 A PyYAML pontos verzióval szerepel a `pyproject.toml` függőségei között és a `uv.lock`-ban; a README szabálytáblája és a „Not fixed automatically” lista leírja az új szabályt
+- [x] #1 Privát és internal repóban minden `.github/workflows/*.yml|*.yaml` job, amelynek `runs-on` címkehalmaza (kis- és nagybetűtől függetlenül) nem egyezik pontosan egy `allowed_runs_on` halmazzal, pontosan egy `fixable=False` findingot ad, ami megnevezi a fájlt, a jobot, a tényleges és az engedélyezett értéket
+- [x] #2 Publikus repón nincs finding, és a szabály nem olvas workflow-fájlt; hiányzó `visibility` `NOT_READABLE` findingot ad
+- [x] #3 `${{ }}` kifejezés, mapping alakú `runs-on`, külső `uses` reusable workflow, hiányzó `runs-on`/`uses`, érvénytelen vagy több dokumentumos YAML, hiányzó `jobs` és nem listázható fa mind `fixable=False` findingot ad; a `uses: ./...` helyi hívás nem ad findingot
+- [x] #4 A szabály `check` és `fix` módban sem ír fájlt, beállítást vagy rulesetet, és egyedül nem nyit PR-t
+- [x] #5 Config-hiba (`ConfigError`): hiányzó, üres vagy rossz típusú `allowed_runs_on`, üres címke, `self-hosted` nélküli halmaz, kisbetűsítve duplikált halmaz, ismeretlen kulcs
+- [x] #6 A `github-manager.toml` utolsó szabálya a `private-self-hosted-runners` (`allowed_runs_on = [["self-hosted"]]`), és a `test_repository_config_file_is_valid` ezt ellenőrzi
+- [x] #7 A PyYAML pontos verzióval szerepel a `pyproject.toml` függőségei között és a `uv.lock`-ban; a README szabálytáblája és a „Not fixed automatically” lista leírja az új szabályt
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 A `uv run ruff format -q .` és a `task verify` hiba nélkül lefut (formázás, lint, ty, deptry, pytest ≥80% branch coverage, audit, build)
-- [ ] #2 Az új tesztek egyike sem hív valódi GitHub API-t; éles fiókon legfeljebb a csak olvasó `github-manager repos` parancs fut
-- [ ] #3 A `.claude/skills/github-manager-rules/SKILL.md` leírja a `self_hosted_runners` szabályt és az új szabálysorrendet
+- [x] #1 A `uv run ruff format -q .` és a `task verify` hiba nélkül lefut (formázás, lint, ty, deptry, pytest ≥80% branch coverage, audit, build)
+- [x] #2 Az új tesztek egyike sem hív valódi GitHub API-t; éles fiókon legfeljebb a csak olvasó `github-manager repos` parancs fut
+- [x] #3 A `.claude/skills/github-manager-rules/SKILL.md` leírja a `self_hosted_runners` szabályt és az új szabálysorrendet
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add pyyaml pin (+types-pyyaml if ty needs). 2. Workspace.paths in Protocol, RemoteWorkspace, MemoryWorkspace; FakeGitHub tree_paths None option. 3. SelfHostedRunners rule + RULE_TYPES. 4. toml rule. 5. Tests (rules, engine, config). 6. README. 7. Project skill.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-5-uj-self-hosted-runners-szabalytipus-privat-es-in.
+
+Implemented SelfHostedRunners, Workspace.paths, PyYAML 6.0.3 pin, toml rule, tests, README, project skill (SKILL.md is gitignored). types-pyyaml not needed.
+
+Final review: ruff format exit 0 and task verify exit 0 (245 passed, 99.46% coverage, audit, build) in this session; targeted -k self_hosted/repository_config_file run: 67 passed. SKILL.md read directly (gitignored). Manual post-merge enforce check not run.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added report-only self_hosted_runners rule (SelfHostedRunners in rules.py), Workspace.paths (Protocol, RemoteWorkspace, test fakes), pyyaml==6.0.3 pin and uv.lock, toml rule as last rule, tests, README rows, project skill section (SKILL.md is gitignored, not in the diff). Verified: ruff format and task verify exit 0, 245 tests, 99.46% coverage. Not run: manual post-merge enforce check. Risk: the daily enforce run exits 1 while out-of-scope-compliant workflows exist (intended).
+<!-- SECTION:FINAL_SUMMARY:END -->

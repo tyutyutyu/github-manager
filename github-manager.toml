@@ -106,6 +106,14 @@ type = "repo_visibility"
 visibility = { "tyutyutyu" = "public", "tyutyutyu-org" = "private" }
 exclude = []
 
+[[rules]]
+id = "private-self-hosted-runners"
+type = "self_hosted_runners"
+# Private and internal repositories: every job must run on exactly one of these label
+# sets. Mismatches are reported ([manual]).
+allowed_runs_on = [["self-hosted"]]
+exclude = []
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"

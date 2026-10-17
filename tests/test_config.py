@@ -10,6 +10,7 @@ from github_manager.rules import (
     RepoSettings,
     RepoVisibility,
     RequiredLines,
+    SelfHostedRunners,
 )
 
 RULES = [
@@ -28,6 +29,7 @@ def test_repository_config_file_is_valid() -> None:
         RepoSettings,
         RepoRuleset,
         RepoVisibility,
+        SelfHostedRunners,
     ]
     repo_settings = config.rules[3]
     assert isinstance(repo_settings, RepoSettings)
@@ -54,6 +56,10 @@ def test_repository_config_file_is_valid() -> None:
     assert isinstance(visibility, RepoVisibility)
     assert visibility.id == "repo-visibility"
     assert visibility.visibility == {"tyutyutyu": "public", "tyutyutyu-org": "private"}
+    runners = config.rules[6]
+    assert isinstance(runners, SelfHostedRunners)
+    assert runners.id == "private-self-hosted-runners"
+    assert runners.allowed_runs_on == [["self-hosted"]]
 
 
 def test_defaults_apply(tmp_path: Path) -> None:
@@ -101,6 +107,24 @@ def test_visibility_owners_must_be_listed_in_owners() -> None:
 def test_visibility_owners_match_case_insensitively_and_may_be_partial() -> None:
     raw = {"owners": ["Me", "other"], "rules": [visibility_rule(me="public")]}
     assert parse_config(raw, Path()).owners == ["Me", "other"]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"allowed_runs_on": []},
+        {"allowed_runs_on": "self-hosted"},
+        {"allowed_runs_on": [[""]]},
+        {"allowed_runs_on": [["linux"]]},
+        {"allowed_runs_on": [["self-hosted"], ["Self-Hosted"]]},
+        {"allowed_runs_on": [["self-hosted"]], "typo": 1},
+    ],
+)
+def test_invalid_self_hosted_runners_options_are_config_errors(options) -> None:
+    rule = {"id": "sh", "type": "self_hosted_runners", **options}
+    with pytest.raises(ConfigError, match="rule sh:"):
+        parse_config({"owners": ["me"], "rules": [rule]}, Path())
 
 
 def test_missing_and_malformed_files(tmp_path: Path) -> None:

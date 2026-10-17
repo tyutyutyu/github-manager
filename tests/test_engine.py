@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from github_manager.config import Config
-from github_manager.engine import Outcome, process_repo, select_repos
+from github_manager.engine import Outcome, RemoteWorkspace, process_repo, select_repos
 from github_manager.github import GitHubError
 from github_manager.rules import (
     BranchStrategy,
@@ -12,6 +12,7 @@ from github_manager.rules import (
     RepoSettings,
     RepoVisibility,
     RequiredLines,
+    SelfHostedRunners,
 )
 
 RULE = RequiredLines.from_options(
@@ -28,6 +29,10 @@ RULESET_NAME = "github-manager: dr"
 VISIBILITY_RULE = RepoVisibility.from_options(
     {"id": "rv", "visibility": {"owner": "private"}}, Path()
 )
+RUNNERS_RULE = SelfHostedRunners.from_options(
+    {"id": "sh", "allowed_runs_on": [["self-hosted"]]}, Path()
+)
+UBUNTU_WORKFLOW = "jobs:\n  test:\n    runs-on: ubuntu-latest\n"
 
 
 def repo_named(api, name):
@@ -495,3 +500,68 @@ def test_visibility_finding_goes_to_manual_section_of_pull_request(fake_github) 
     _, body, _ = fake_github.pulls[name][1]
     assert '### Needs manual action\n- rv: visibility is "public", expected "private"' in body
     assert fake_github.repos[name].settings == {"visibility": "public"}
+
+
+def test_self_hosted_runners_are_reported_and_never_fixed(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    name = fake_github.add_repo(
+        "app",
+        {".github/workflows/ci.yml": UBUNTU_WORKFLOW},
+        settings={"visibility": "private"},
+    )
+
+    for fix in (False, True):
+        report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=fix)
+        assert report.outcome is Outcome.NEEDS_FIX
+        assert [finding.message for finding in report.manual_findings] == [
+            '.github/workflows/ci.yml: job test: runs-on ["ubuntu-latest"] is not an allowed '
+            'self-hosted runner (allowed: ["self-hosted"])'
+        ]
+    assert not [call for call in fake_github.calls if call.startswith(("commit", "create"))]
+    assert not [call for call in fake_github.calls if call.startswith("settings")]
+    assert fake_github.pulls[name] == {}
+    assert fake_github.files_at(name, "main") == {".github/workflows/ci.yml": UBUNTU_WORKFLOW}
+
+
+def test_self_hosted_runners_skip_public_repository(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    fake_github.add_repo(
+        "app", {".github/workflows/ci.yml": UBUNTU_WORKFLOW}, settings={"visibility": "public"}
+    )
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+    assert report.outcome is Outcome.COMPLIANT
+
+
+def test_self_hosted_runners_unlistable_tree_is_manual(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    fake_github.add_repo(
+        "app",
+        {".github/workflows/ci.yml": UBUNTU_WORKFLOW},
+        settings={"visibility": "private"},
+        tree_listable=False,
+    )
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+    assert report.outcome is Outcome.NEEDS_FIX
+    assert [finding.message for finding in report.manual_findings] == [
+        ".github/workflows/: the workflow files cannot be listed"
+    ]
+
+
+def test_remote_workspace_paths_include_files_written_by_rules(fake_github) -> None:
+    name = fake_github.add_repo(
+        "app", {".github/workflows/b.yml": "x", "README.md": "y"}, settings={}
+    )
+    workspace = RemoteWorkspace(fake_github, name, "base", "main")
+    workspace.write(".github/workflows/a.yml", "z")
+    workspace.write("other.txt", "z")
+    assert workspace.paths(".github/workflows/") == [
+        ".github/workflows/a.yml",
+        ".github/workflows/b.yml",
+    ]
+
+
+def test_remote_workspace_paths_are_none_when_tree_is_not_listable(fake_github) -> None:
+    name = fake_github.add_repo("app", {"a": "x"}, tree_listable=False)
+    workspace = RemoteWorkspace(fake_github, name, "base", "main")
+    workspace.write("b", "z")
+    assert workspace.paths("") is None

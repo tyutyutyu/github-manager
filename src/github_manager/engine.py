@@ -110,6 +110,13 @@ class RemoteWorkspace:
     def write(self, path: str, content: str) -> None:
         self._written[path] = content
 
+    def paths(self, prefix: str) -> list[str] | None:
+        if self._paths is None:
+            return None
+        return sorted(
+            path for path in self._paths | self._written.keys() if path.startswith(prefix)
+        )
+
     def setting(self, name: str) -> Any:
         if self._settings is None:
             self._settings = self._api.repo_settings(self._repo)
