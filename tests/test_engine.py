@@ -16,7 +16,7 @@ from github_manager.rules import (
 )
 
 RULE = RequiredLines.from_options(
-    {"id": "gi", "path": ".gitignore", "lines": [".env"], "exclude": ["skip-rule"]}, Path()
+    {"id": "gi", "path": ".gitignore", "lines": ".env", "exclude": ["skip-rule"]}, Path()
 )
 CONFIG = Config(owners=["owner"], rules=[RULE], exclude=["legacy-*"])
 SETTINGS_RULE = RepoSettings.from_options(
@@ -73,7 +73,7 @@ def test_select_repos_spans_owners(fake_github) -> None:
 
 def test_rule_exclude_matches_full_name() -> None:
     rule = RequiredLines.from_options(
-        {"id": "x", "path": "p", "lines": ["a"], "exclude": ["org/*"]}, Path()
+        {"id": "x", "path": "p", "lines": "a", "exclude": ["org/*"]}, Path()
     )
     assert not rule.applies_to("app", "org/app")
     assert rule.applies_to("app", "owner/app")
@@ -159,7 +159,7 @@ def test_pull_request_body_lists_manual_findings(fake_github) -> None:
 
 
 def test_api_errors_are_reported_per_repository(fake_github) -> None:
-    rule = RequiredLines.from_options({"id": "x", "path": "broken", "lines": ["a"]}, Path())
+    rule = RequiredLines.from_options({"id": "x", "path": "broken", "lines": "a"}, Path())
     fake_github.add_repo("app", {"broken": ""})
     report = process_repo(
         fake_github,
