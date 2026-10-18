@@ -30,7 +30,7 @@ VISIBILITY_RULE = RepoVisibility.from_options(
     {"id": "rv", "visibility": {"owner": "private"}}, Path()
 )
 RUNNERS_RULE = SelfHostedRunners.from_options(
-    {"id": "sh", "allowed_runs_on": [["self-hosted"]]}, Path()
+    {"id": "sh", "allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted"]}, Path()
 )
 UBUNTU_WORKFLOW = "jobs:\n  test:\n    runs-on: ubuntu-latest\n"
 
@@ -502,25 +502,65 @@ def test_visibility_finding_goes_to_manual_section_of_pull_request(fake_github) 
     assert fake_github.repos[name].settings == {"visibility": "public"}
 
 
-def test_self_hosted_runners_are_reported_and_never_fixed(fake_github) -> None:
+def test_self_hosted_runners_fix_opens_pull_request_with_rewritten_workflow(fake_github) -> None:
     config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    path = ".github/workflows/ci.yml"
+    name = fake_github.add_repo("app", {path: UBUNTU_WORKFLOW}, settings={"visibility": "private"})
+
+    check = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+    assert check.outcome is Outcome.NEEDS_FIX
+    assert fake_github.pulls[name] == {}
+
+    first = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert first.outcome is Outcome.PR_CREATED
+    assert fake_github.files_at(name, config.branch) == {
+        path: UBUNTU_WORKFLOW.replace("ubuntu-latest", "self-hosted")
+    }
+    assert fake_github.files_at(name, "main") == {path: UBUNTU_WORKFLOW}
+    _, body, _ = fake_github.pulls[name][1]
+    assert "Needs manual action" not in body
+
+    second = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert second.outcome is Outcome.PR_UP_TO_DATE
+
+
+def test_self_hosted_runners_fixed_and_manual_jobs_share_one_pull_request(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    path = ".github/workflows/ci.yml"
+    workflow = UBUNTU_WORKFLOW + "  win:\n    runs-on: windows-latest\n"
+    name = fake_github.add_repo("app", {path: workflow}, settings={"visibility": "private"})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.PR_CREATED
+    assert fake_github.files_at(name, config.branch) == {
+        path: workflow.replace("ubuntu-latest", "self-hosted")
+    }
+    _, body, _ = fake_github.pulls[name][1]
+    assert (
+        f'### Needs manual action\n- sh: {path}: job win: runs-on ["windows-latest"] is not an '
+        'allowed self-hosted runner (allowed: ["self-hosted"])'
+    ) in body
+    assert "job test: runs-on" in body.split("### Needs manual action")[0]
+
+
+def test_self_hosted_runners_unfixable_jobs_open_no_pull_request(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    workflow = "jobs:\n  test:\n    runs-on: windows-latest\n"
     name = fake_github.add_repo(
-        "app",
-        {".github/workflows/ci.yml": UBUNTU_WORKFLOW},
-        settings={"visibility": "private"},
+        "app", {".github/workflows/ci.yml": workflow}, settings={"visibility": "private"}
     )
 
     for fix in (False, True):
         report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=fix)
         assert report.outcome is Outcome.NEEDS_FIX
         assert [finding.message for finding in report.manual_findings] == [
-            '.github/workflows/ci.yml: job test: runs-on ["ubuntu-latest"] is not an allowed '
+            '.github/workflows/ci.yml: job test: runs-on ["windows-latest"] is not an allowed '
             'self-hosted runner (allowed: ["self-hosted"])'
         ]
     assert not [call for call in fake_github.calls if call.startswith(("commit", "create"))]
     assert not [call for call in fake_github.calls if call.startswith("settings")]
     assert fake_github.pulls[name] == {}
-    assert fake_github.files_at(name, "main") == {".github/workflows/ci.yml": UBUNTU_WORKFLOW}
+    assert fake_github.files_at(name, "main") == {".github/workflows/ci.yml": workflow}
 
 
 def test_self_hosted_runners_skip_public_repository(fake_github) -> None:
