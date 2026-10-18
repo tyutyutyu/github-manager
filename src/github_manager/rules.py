@@ -9,8 +9,10 @@ import contextlib
 import json
 import re
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, Self
 
@@ -683,7 +685,20 @@ class RepoVisibility(Rule):
 
 WORKFLOWS_DIR = ".github/workflows/"
 SELF_HOSTED = "self-hosted"
+UBUNTU_PATTERN = "ubuntu-*"
 YAML_STR = "tag:yaml.org,2002:str"
+UNSAFE_REWRITE = "cannot rewrite safely"
+
+
+@dataclass(frozen=True)
+class _Replacement:
+    """One `runs-on` value to overwrite: `text[start:end]` becomes `text`."""
+
+    job: str
+    problem: str
+    start: int
+    end: int
+    text: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -691,15 +706,18 @@ class SelfHostedRunners(Rule):
     """Every job of a private or internal repository must run on an allowed self-hosted runner.
 
     `allowed_runs_on` lists the accepted label sets; a job's `runs-on` must equal one of them
-    exactly (as a set, ignoring case). Jobs whose runner cannot be decided statically
-    (expressions, matrices, mappings, external reusable workflows) are reported too, and so are
-    workflow files that cannot be parsed. Public repositories are not checked. Nothing is
-    written: every finding needs manual action.
+    exactly (as a set, ignoring case). A single `ubuntu-*` label and a label set that contains
+    `self-hosted` but is not allowed are rewritten to `runs_on`, when the value sits on the
+    same line as its `runs-on` key (a scalar or a flow list); the rest of the file stays
+    byte for byte the same. Every other job (other operating systems, unknown labels,
+    expressions, matrices, mappings, external reusable workflows) and workflow files that
+    cannot be parsed are reported as manual. Public repositories are not checked.
     """
 
     type_name: ClassVar[str] = "self_hosted_runners"
 
     allowed_runs_on: list[list[str]]
+    runs_on: list[str]
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
@@ -716,7 +734,14 @@ class SelfHostedRunners(Rule):
             if folded in seen:
                 raise ValueError(f"duplicate 'allowed_runs_on' set: {json.dumps(labels)}")
             seen.add(folded)
-        return cls(allowed_runs_on=allowed, **common)
+        runs_on = options.text_list("runs_on", REQUIRED)
+        if not runs_on:
+            raise ValueError("'runs_on' must not be empty")
+        if frozenset(label.casefold() for label in runs_on) not in seen:
+            raise ValueError(
+                f"'runs_on' {json.dumps(runs_on)} must equal one of the 'allowed_runs_on' sets"
+            )
+        return cls(allowed_runs_on=allowed, runs_on=runs_on, **common)
 
     def apply(self, workspace: Workspace) -> list[Finding]:
         visibility = workspace.setting("visibility")
@@ -733,30 +758,102 @@ class SelfHostedRunners(Rule):
             for path in listed
             if path.endswith((".yml", ".yaml")) and "/" not in path[len(WORKFLOWS_DIR) :]
         ]
-        return [
-            Finding(self.id, f"{path}: {problem}", fixable=False)
-            for path in files
-            for problem in self._problems(workspace.read(path))
-        ]
+        return [finding for path in files for finding in self._check_file(workspace, path)]
 
-    def _problems(self, text: str | None) -> list[str]:
+    def _check_file(self, workspace: Workspace, path: str) -> list[Finding]:
+        text = workspace.read(path)
         if text is None:
-            return ["the file is not readable"]
-        try:
-            root = yaml.compose(text, Loader=yaml.SafeLoader)
-        except yaml.YAMLError as exc:
-            problem = getattr(exc, "problem", None) or "invalid YAML"
-            return [f"invalid YAML ({problem})"]
-        top = _mapping(root)
-        jobs = _mapping(top.get("jobs")) if top is not None else None
+            return [self._manual(path, "the file is not readable")]
+        jobs, error = _jobs(text)
         if jobs is None:
-            return ["no 'jobs' mapping"]
-        problems = []
+            return [self._manual(path, error or "")]
+        findings = []
+        replacements = []
+        # Jobs that share one mapping through an alias reach the same value node.
+        reached = Counter(id(_entry(job, "runs-on")[1]) for job in jobs.values())
         for name, job in jobs.items():
             problem = self._job_problem(job)
-            if problem:
-                problems.append(f"job {name}: {problem}")
-        return problems
+            if problem is None:
+                continue
+            if not self._rewritable(job):
+                findings.append(self._manual(path, f"job {name}: {problem}"))
+                continue
+            replacement = self._replacement(name, problem, job, text)
+            if replacement is None or reached[id(_entry(job, "runs-on")[1])] > 1:
+                findings.append(self._manual(path, f"job {name}: {problem}; {UNSAFE_REWRITE}"))
+            else:
+                replacements.append(replacement)
+        if not replacements:
+            return findings
+        ordered = sorted(replacements, key=lambda item: item.start, reverse=True)
+        overlapping = any(before.end > after.start for after, before in pairwise(ordered))
+        new_text = text
+        for replacement in ordered:
+            new_text = (
+                new_text[: replacement.start] + replacement.text + new_text[replacement.end :]
+            )
+        if overlapping or not self._verified(new_text, replacements):
+            findings.extend(
+                self._manual(path, f"job {item.job}: {item.problem}; {UNSAFE_REWRITE}")
+                for item in replacements
+            )
+            return findings
+        workspace.write(path, new_text)
+        wanted = json.dumps(self.runs_on)
+        findings.extend(
+            Finding(self.id, f"{path}: job {item.job}: {item.problem}; set runs-on to {wanted}")
+            for item in replacements
+        )
+        return findings
+
+    def _manual(self, path: str, problem: str) -> Finding:
+        return Finding(self.id, f"{path}: {problem}", fixable=False)
+
+    def _verified(self, new_text: str, replacements: list[_Replacement]) -> bool:
+        """True when the rewritten file parses and every rewritten job is now allowed."""
+        jobs, _ = _jobs(new_text)
+        return jobs is not None and all(
+            item.job in jobs and self._job_problem(jobs[item.job]) is None for item in replacements
+        )
+
+    def _rewritable(self, job: yaml.Node) -> bool:
+        """True for a single `ubuntu-*` label or a label set with `self-hosted`."""
+        labels = _labels((_mapping(job) or {}).get("runs-on"))
+        if labels is None or any("${{" in label for label in labels):
+            return False
+        folded = frozenset(label.casefold() for label in labels)
+        if folded in self._allowed_sets():
+            return False
+        return SELF_HOSTED in folded or (
+            len(folded) == 1 and fnmatchcase(next(iter(folded)), UBUNTU_PATTERN)
+        )
+
+    def _replacement(
+        self, name: str, problem: str, job: yaml.Node, text: str
+    ) -> _Replacement | None:
+        """The edit for a job's `runs-on`, or None when the value is not safe to splice."""
+        key, value = _entry(job, "runs-on")
+        if key is None or value is None:
+            return None
+        start, end = value.start_mark, value.end_mark
+        one_line = key.start_mark.line == start.line == end.line
+        scalar_or_flow = isinstance(value, yaml.ScalarNode) or (
+            isinstance(value, yaml.SequenceNode) and bool(value.flow_style)
+        )
+        # An anchor or tag belongs to the node's own span; dropping it would break aliases.
+        if not (one_line and scalar_or_flow) or text[start.index] in "&!":
+            return None
+        # A list item that is an alias starts outside the list; an anchored or tagged one
+        # starts with its `&` or `!`.
+        items = value.value if isinstance(value, yaml.SequenceNode) else []
+        if any(
+            not start.index < item.start_mark.index < end.index
+            or text[item.start_mark.index] in "&!*"
+            for item in items
+        ):
+            return None
+        rendered = self.runs_on[0] if len(self.runs_on) == 1 else f"[{', '.join(self.runs_on)}]"
+        return _Replacement(name, problem, start.index, end.index, rendered)
 
     def _job_problem(self, job: yaml.Node) -> str | None:
         fields = _mapping(job)
@@ -802,6 +899,40 @@ def _mapping(node: yaml.Node | None) -> dict[str, yaml.Node] | None:
     if not isinstance(node, yaml.MappingNode):
         return None
     return {key.value: value for key, value in node.value if isinstance(key, yaml.ScalarNode)}
+
+
+def _entry(node: yaml.Node, name: str) -> tuple[yaml.Node | None, yaml.Node | None]:
+    """The key and value nodes of the scalar key `name` in a YAML mapping node."""
+    if isinstance(node, yaml.MappingNode):
+        for key, value in node.value:
+            if isinstance(key, yaml.ScalarNode) and key.value == name:
+                return key, value
+    return None, None
+
+
+def _jobs(text: str) -> tuple[dict[str, yaml.Node] | None, str | None]:
+    """The `jobs` entries of a workflow file, or None and the reason they cannot be read."""
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        problem = getattr(exc, "problem", None) or "invalid YAML"
+        return None, f"invalid YAML ({problem})"
+    top = _mapping(root)
+    jobs = _mapping(top.get("jobs")) if top is not None else None
+    if jobs is None:
+        return None, "no 'jobs' mapping"
+    return jobs, None
+
+
+def _labels(node: yaml.Node | None) -> list[str] | None:
+    """The labels of a `runs-on` string or list of strings; None for any other node."""
+    if _text(node) is not None:
+        return [_text(node) or ""]
+    if isinstance(node, yaml.SequenceNode):
+        texts = [_text(item) for item in node.value]
+        if all(text is not None for text in texts):
+            return [text for text in texts if text is not None]
+    return None
 
 
 def _json(node: yaml.Node) -> str:

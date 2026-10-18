@@ -3,9 +3,10 @@ id: TASK-6
 title: >-
   self_hosted_runners: ubuntu-* és nem pontos self-hosted runs-on automatikus
   cseréje self-hosted-re a compliance PR-ban
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-17 19:39'
+updated_date: '2026-10-18 00:05'
 labels: []
 dependencies:
   - TASK-5
@@ -83,18 +84,40 @@ A `self_hosted_runners` szabály `fix` módban az átírható `runs-on` értéke
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Privát vagy internal repóban az egyelemű `ubuntu-*` és a `self-hosted`-et tartalmazó, de nem engedélyezett `runs-on` érték `fix` módban a `runs_on` értékre (`self-hosted`) cserélődik a compliance PR-ban, a finding `fixable=True`
-- [ ] #2 A javított fájl csak a cserélt értékekben tér el: a behúzás, a záró kommentek, a sorvégek (LF/CRLF), a fájl végi újsor és minden más sor bájtra azonos
-- [ ] #3 Egy fájlon belül több javítandó job egy írással javul, és a javított fájlon a második futás nem ad findingot
-- [ ] #4 Több soros block lista, alias, vagy olyan érték, ami a cserével sem lenne engedélyezett, nem íródik át, hanem `fixable=False` finding marad; `windows-*`, `macos-*` és ismeretlen címkék továbbra is `fixable=False`
-- [ ] #5 Ha egy repóban javítható és nem javítható job is van, a PR tartalmazza a javítást, a nem javítható finding a PR „Needs manual action” részébe kerül
-- [ ] #6 Config-hiba (`ConfigError`): hiányzó, üres vagy olyan `runs_on`, ami nem egyezik egy `allowed_runs_on` halmazzal sem; a `github-manager.toml` `runs_on = ["self-hosted"]` értékét a `test_repository_config_file_is_valid` ellenőrzi
-- [ ] #7 A README (szabálytábla, „Not fixed automatically”, token-tábla Workflows sora) és az `enforce.yml` fejléc-kommentje a javítást és a kötelező Workflows: Read and write jogot írja le
+- [x] #1 Privát vagy internal repóban az egyelemű `ubuntu-*` és a `self-hosted`-et tartalmazó, de nem engedélyezett `runs-on` érték `fix` módban a `runs_on` értékre (`self-hosted`) cserélődik a compliance PR-ban, a finding `fixable=True`
+- [x] #2 A javított fájl csak a cserélt értékekben tér el: a behúzás, a záró kommentek, a sorvégek (LF/CRLF), a fájl végi újsor és minden más sor bájtra azonos
+- [x] #3 Egy fájlon belül több javítandó job egy írással javul, és a javított fájlon a második futás nem ad findingot
+- [x] #4 Több soros block lista, alias, vagy olyan érték, ami a cserével sem lenne engedélyezett, nem íródik át, hanem `fixable=False` finding marad; `windows-*`, `macos-*` és ismeretlen címkék továbbra is `fixable=False`
+- [x] #5 Ha egy repóban javítható és nem javítható job is van, a PR tartalmazza a javítást, a nem javítható finding a PR „Needs manual action” részébe kerül
+- [x] #6 Config-hiba (`ConfigError`): hiányzó, üres vagy olyan `runs_on`, ami nem egyezik egy `allowed_runs_on` halmazzal sem; a `github-manager.toml` `runs_on = ["self-hosted"]` értékét a `test_repository_config_file_is_valid` ellenőrzi
+- [x] #7 A README (szabálytábla, „Not fixed automatically”, token-tábla Workflows sora) és az `enforce.yml` fejléc-kommentje a javítást és a kötelező Workflows: Read and write jogot írja le
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 A `uv run ruff format -q .` és a `task verify` hiba nélkül lefut (formázás, lint, ty, deptry, pytest ≥80% branch coverage, audit, build)
-- [ ] #2 Az új tesztek egyike sem hív valódi GitHub API-t; éles fiókon legfeljebb a csak olvasó `github-manager repos` parancs fut
-- [ ] #3 A `.claude/skills/github-manager-rules/SKILL.md` `self_hosted_runners` szakasza leírja a javítási szabályokat
+- [x] #1 A `uv run ruff format -q .` és a `task verify` hiba nélkül lefut (formázás, lint, ty, deptry, pytest ≥80% branch coverage, audit, build)
+- [x] #2 Az új tesztek egyike sem hív valódi GitHub API-t; éles fiókon legfeljebb a csak olvasó `github-manager repos` parancs fut
+- [x] #3 A `.claude/skills/github-manager-rules/SKILL.md` `self_hosted_runners` szakasza leírja a javítási szabályokat
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. rules.py: required runs_on option + _build validation; classify rewritable runs-on (single ubuntu-* or set containing self-hosted, no expressions); single-line scalar/flow-seq splice via node marks, back-to-front, byte-preserving; re-parse self-check before workspace.write; otherwise fixable=False.
+2. Update github-manager.toml, tests (rules/engine/config), README, enforce.yml header, project skill.
+3. Run focused pytest + ruff format/check only (workflow owns task verify).
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-6-self-hosted-runners-ubuntu-es-nem-pontos-self-ho.
+
+Finalization: ran 'uv run ruff format -q .' (exit 0) and 'task verify' (exit 0; 312 passed, total coverage 99.22%, rules.py 99%, audit and build ok); git status unchanged by both. Read the full diff of rules.py, README, enforce.yml, github-manager.toml and tests; no untracked files. SKILL.md is gitignored (.gitignore:271 .claude/) so it is not in the diff; its self_hosted_runners section (Fixing, Safe replacement, Self-check) was read. The manual post-merge GitHub Actions check from Verification was not run.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+self_hosted_runners now has a required runs_on option (validated against allowed_runs_on) and rewrites a single ubuntu-* label or a non-allowed self-hosted set to runs_on in the compliance PR. It splices only the one-line scalar/flow-list value, back to front, then re-parses to check the result before writing; aliases, anchors, tags, multi-line values and shared nodes stay fixable=False ('cannot rewrite safely'). windows-*, macos-*, unknown labels and expressions stay manual. README, enforce.yml header, github-manager.toml and tests were updated; the gitignored project skill describes the rules. Verified in this session: ruff format exit 0, task verify exit 0 (312 passed, 99.22% coverage). Not run: the post-merge manual GitHub Actions check (check/fix on tyutyutyu-org/proxy-manager).
+<!-- SECTION:FINAL_SUMMARY:END -->

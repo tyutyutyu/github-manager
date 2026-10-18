@@ -110,8 +110,14 @@ exclude = []
 id = "private-self-hosted-runners"
 type = "self_hosted_runners"
 # Private and internal repositories: every job must run on exactly one of these label
-# sets. Mismatches are reported ([manual]).
+# sets. A single ubuntu-* label and a self-hosted label set that is not allowed (e.g.
+# [self-hosted, Linux, X64, zhukov]) are replaced with `runs_on` in the pull request (only
+# a one-line value; the rest of the file is left untouched). Anything else (windows-*,
+# macos-*, unknown labels, expressions, matrices, mappings, multi-line or aliased values)
+# is reported ([manual]).
 allowed_runs_on = [["self-hosted"]]
+# The value that replaces them; it must equal one of the allowed_runs_on sets.
+runs_on = ["self-hosted"]
 exclude = []
 
 # Example: keep a file identical to a template stored in this repository.
