@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 00:31'
-updated_date: '2026-10-18 00:33'
+updated_date: '2026-10-18 01:17'
 labels: []
 dependencies: []
 documentation:
@@ -53,6 +53,8 @@ A felhasználó döntései (2026-10-18):
 
 <!-- SECTION:NOTES:BEGIN -->
 Options.text_block (rules.py) parse-olja a lines-t; RequiredLines._build ezt használja. A remove_lines lista maradt. A projekt skill (.claude/skills/github-manager-rules/SKILL.md) required_lines szerződése frissítve; ez a fájl gitignore-olt (.gitignore:271 .claude/), nem kerül a PR-ba.
+
+A felhasználó a commit előtt átírta a gitignore-baseline tartalmát (kikerült a .claude/ és a !.claude/skills/, bekerültek a Claude Code és ECC sorok, belső üres sorokkal és kommentekkel). A test_repository_config_file_is_valid ehhez igazítva; task verify exit 0, 249 teszt.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

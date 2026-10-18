@@ -33,7 +33,20 @@ def test_repository_config_file_is_valid() -> None:
     ]
     gitignore = config.rules[1]
     assert isinstance(gitignore, RequiredLines)
-    assert gitignore.lines == [".DS_Store", ".idea/", ".env", ".claude/", "!.claude/skills/"]
+    assert gitignore.lines == [
+        ".DS_Store",
+        ".idea/",
+        ".env",
+        "",
+        "# Claude Code - local configuration",
+        ".claude/settings.local.json",
+        "CLAUDE.local.md",
+        "",
+        "# ECC - temporary files",
+        ".observer-tmp/",
+        ".claude/worktrees/",
+        ".claude/scheduled_tasks.lock",
+    ]
     assert gitignore.remove_lines == [".claude/autoharness/"]
     repo_settings = config.rules[3]
     assert isinstance(repo_settings, RepoSettings)
