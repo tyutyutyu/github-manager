@@ -100,7 +100,7 @@ def test_findings_are_aligned_and_printed_verbatim(fake_github, tmp_path, capsys
     path.write_text(
         CONFIG
         + '[[rules]]\nid = "runners"\ntype = "self_hosted_runners"\n'
-        + 'allowed_runs_on = [["self-hosted"]]\n'
+        + 'allowed_runs_on = [["self-hosted"]]\nruns_on = ["self-hosted"]\n'
     )
     workflow = "jobs:\n  b:\n    runs-on: windows-latest\n"
     fake_github.add_repo(
