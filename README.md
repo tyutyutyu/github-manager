@@ -43,13 +43,16 @@ Exit codes: `0` compliant (or every finding has a pull request), `1` findings re
 | `repo_ruleset` | the default branch has a ruleset named `github-manager: <id>` that forbids deletion and force pushes and requires a pull request (0 approvals, conversations resolved), with no bypass actors; optional `required_status_checks = { "<glob>" = ["<check>", ...] }` (globs match the repo name or `OWNER/NAME`; a repository gets the sorted union of all matching globs' checks, none if nothing matches) and `strict_required_status_checks` (default `false`) | creates or replaces that ruleset directly on the repository, not by pull request; other (manual, organization) rulesets are never touched. A private repository on the GitHub Free plan has no rulesets: reported as *manual* |
 | `branch_strategy` | the default branch is `default_branch` (default `main`) and none of `forbidden_branches` (default `["develop"]`) exists | none: reported as *manual* |
 | `repo_visibility` | the repository has the visibility given by `visibility = { "<owner>" = "public" \| "private" }` for its owner (case-insensitive; owners missing from the table are not checked, and every key must be listed in `owners`) | none: reported as *manual* (changing the visibility or transferring the repository is a human decision) |
-| `self_hosted_runners` | in private and internal repositories (public ones are not checked), the `runs-on` of every job in `.github/workflows/*.yml\|*.yaml` equals one of the label sets in `allowed_runs_on = [["self-hosted"]]` (exact match as a set, case-insensitive; every set must contain `self-hosted`) | none: reported as *manual* (expressions, matrices, mappings, external reusable workflows and unparsable files are reported too; local `uses: ./...` calls are skipped) |
+| `self_hosted_runners` | in private and internal repositories (public ones are not checked), the `runs-on` of every job in `.github/workflows/*.yml\|*.yaml` equals one of the label sets in `allowed_runs_on = [["self-hosted"]]` (exact match as a set, case-insensitive; every set must contain `self-hosted`) | rewrites the `runs-on` of a job to `runs_on` (required, e.g. `["self-hosted"]`; it must equal one of the `allowed_runs_on` sets) in the pull request when it is a single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed (e.g. `[self-hosted, Linux, X64, zhukov]`) and the value sits on the same line as the `runs-on` key (a scalar or a one-line list); only that value changes, the rest of the file stays byte for byte the same, and the file is re-parsed to check the result before it is written. Everything else is reported as *manual* (see below); local `uses: ./...` calls are skipped |
 
 Not fixed automatically (reported as *manual*): several Renovate configs in one repo,
 invalid JSON, `.json5` configs, settings the token cannot read, several rulesets with
 the same managed name, rulesets on a private repository of the GitHub Free plan, and a
 repository whose visibility differs from `repo_visibility`, and a job of a private or
-internal repository whose `runs-on` is not an allowed `self_hosted_runners` label set.
+internal repository whose `runs-on` `self_hosted_runners` cannot rewrite: `windows-*`,
+`macos-*` and other unknown labels, expressions, matrices, mappings, external reusable
+workflows, unparsable files, and values it cannot replace safely (a multi-line list, an
+alias, an anchor or a tag).
 
 `repo_ruleset` has no bypass actors: once it is applied, nobody (including the owner)
 can push to a default branch directly, only a pull request can change it. Check names in
@@ -85,7 +88,7 @@ Fine-grained tokens → Generate new token*:
   | Pull requests | Read and write | opening, updating and closing the pull request |
   | Administration | Read and write | `repo_settings` (e.g. `delete_branch_on_merge`) and `repo_ruleset` (reading and writing repository rulesets) |
   | Metadata | Read-only | always required (selected automatically) |
-  | Workflows | Read and write | only if a rule edits files under `.github/workflows` |
+  | Workflows | Read and write | `self_hosted_runners` (rewriting the files under `.github/workflows`) |
 
 - **Expiration:** pick a date and renew the token before it expires; an expired token
   makes that owner's job fail with HTTP 401.
