@@ -24,7 +24,24 @@ task repos:check -- --diff               # report violations and show planned ch
 task repos:check -- -r owner/my-repo     # one repository (bare name if unambiguous)
 task repos:check -- -o tyutyutyu-org     # one owner only
 task repos:fix                           # open or refresh pull requests
+task repos:check -- -v                   # also list compliant repositories
 ```
+
+Output: one line per repository with a symbol and its result, then its findings aligned
+in columns (`fix` or `manual`, rule id, message). Compliant repositories are hidden unless
+`-v` / `--verbose` is given; the closing summary always counts every result:
+
+```text
+✖ tyutyutyu-org/ph_toolbox  needs fix
+    fix     gitignore-baseline  .gitignore: managed block is outdated
+    manual  repo-visibility     visibility is "public", expected "private" ...
+
+42 repositories  ✔ 41 compliant  ✖ 1 needs fix
+```
+
+Colours (via [rich](https://github.com/Textualize/rich)) appear on a terminal and in
+GitHub Actions (`GITHUB_ACTIONS=true`), not in a pipe; `NO_COLOR` turns them off and
+`FORCE_COLOR` forces them. `--diff` lines are coloured too. Long lines are never wrapped.
 
 Authentication: `GH_TOKEN` / `GITHUB_TOKEN`, otherwise the token of the logged-in `gh` CLI
 (see [Tokens](#tokens)).
