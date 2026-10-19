@@ -14,7 +14,7 @@ from github_manager.rules import (
 )
 
 RULES = [
-    {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": [".env"]},
+    {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": ".env"},
     {"id": "rn", "type": "renovate_preset", "preset": "local>o/c"},
 ]
 
@@ -31,6 +31,23 @@ def test_repository_config_file_is_valid() -> None:
         RepoVisibility,
         SelfHostedRunners,
     ]
+    gitignore = config.rules[1]
+    assert isinstance(gitignore, RequiredLines)
+    assert gitignore.lines == [
+        ".DS_Store",
+        ".idea/",
+        ".env",
+        "",
+        "# Claude Code - local configuration",
+        ".claude/settings.local.json",
+        "CLAUDE.local.md",
+        "",
+        "# ECC - temporary files",
+        ".observer-tmp/",
+        ".claude/worktrees/",
+        ".claude/scheduled_tasks.lock",
+    ]
+    assert gitignore.remove_lines == [".claude/autoharness/"]
     repo_settings = config.rules[3]
     assert isinstance(repo_settings, RepoSettings)
     assert repo_settings.settings == {
@@ -67,7 +84,7 @@ def test_defaults_apply(tmp_path: Path) -> None:
     path = tmp_path / "rules.toml"
     path.write_text(
         'owners = ["me"]\nexclude = ["old-*"]\n'
-        '[[rules]]\nid = "gi"\ntype = "required_lines"\npath = ".gitignore"\nlines = [".env"]\n'
+        '[[rules]]\nid = "gi"\ntype = "required_lines"\npath = ".gitignore"\nlines = ".env"\n'
     )
     config = load_config(path)
     assert config.exclude == ["old-*"]

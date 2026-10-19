@@ -12,7 +12,7 @@ owners = ["owner"]
 id = "gi"
 type = "required_lines"
 path = ".gitignore"
-lines = [".env"]
+lines = ".env"
 [[rules]]
 id = "rn"
 type = "renovate_preset"

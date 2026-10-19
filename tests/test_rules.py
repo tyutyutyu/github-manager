@@ -21,7 +21,7 @@ PRESET = "local>owner/central//renovate/default"
 
 
 def required_lines(**overrides) -> RequiredLines:
-    options = {"id": "gi", "path": ".gitignore", "lines": [".env", ".idea/"], **overrides}
+    options = {"id": "gi", "path": ".gitignore", "lines": ".env\n.idea/\n", **overrides}
     return RequiredLines.from_options(options, Path())
 
 
@@ -91,6 +91,17 @@ def test_required_lines_reports_malformed_markers(make_workspace, text) -> None:
     assert workspace.files[".gitignore"] == text
 
 
+def test_required_lines_parses_multi_line_string(make_workspace) -> None:
+    lines = "\n\n# macOS\n.DS_Store  \n\n\\#notes\n!.claude/skills/\t\n\n"
+    rule = required_lines(lines=lines)
+    assert rule.lines == ["# macOS", ".DS_Store", "", "\\#notes", "!.claude/skills/"]
+    workspace = make_workspace()
+    rule.apply(workspace)
+    expected = f"{BEGIN}\n# macOS\n.DS_Store\n\n\\#notes\n!.claude/skills/\n{END}\n"
+    assert workspace.files[".gitignore"] == expected
+    assert rule.apply(workspace) == []
+
+
 def test_required_lines_skips_excluded_repositories() -> None:
     rule = required_lines(exclude=["legacy-*"])
     assert not rule.applies_to("legacy-app")
@@ -100,9 +111,12 @@ def test_required_lines_skips_excluded_repositories() -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"lines": []}, "'lines' must not be empty"),
-        ({"lines": [""]}, "list of non-empty strings"),
-        ({"lines": "x"}, "must be of type list"),
+        ({"lines": ""}, "'lines' must not be empty"),
+        ({"lines": "\n  \n\t\n"}, "'lines' must not be empty"),
+        ({"lines": [".env"]}, "must be of type str"),
+        ({"lines": ".env\n  .idea/"}, "'lines' line 2 must not be indented: '  .idea/'"),
+        ({"lines": "\t.env"}, "'lines' line 1 must not be indented"),
+        ({"remove_lines": [""]}, "list of non-empty strings"),
         ({"path": ""}, "must not be empty"),
         ({"colour": "red"}, "unknown keys: colour"),
     ],
@@ -114,7 +128,7 @@ def test_required_lines_rejects_invalid_options(overrides, message) -> None:
 
 def test_rule_requires_id() -> None:
     with pytest.raises(ValueError, match="missing required key 'id'"):
-        RequiredLines.from_options({"path": "x", "lines": ["y"]}, Path())
+        RequiredLines.from_options({"path": "x", "lines": "y"}, Path())
 
 
 # --- renovate_preset ---------------------------------------------------------

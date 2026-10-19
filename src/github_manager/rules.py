@@ -87,6 +87,21 @@ class Options:
             raise ValueError(f"{key!r} must be a list of non-empty strings")
         return list(value)
 
+    def text_block(self, key: str, default: Any = None) -> list[str]:
+        """A multi-line string as lines: outer blank lines and trailing spaces dropped."""
+        value = self._take(key, str, default)
+        lines = [line.rstrip() for line in value.splitlines()]
+        for number, line in enumerate(lines, 1):
+            if line != line.lstrip():
+                raise ValueError(f"{key!r} line {number} must not be indented: {line!r}")
+        while lines and not lines[0]:
+            lines.pop(0)
+        while lines and not lines[-1]:
+            lines.pop()
+        if not lines:
+            raise ValueError(f"{key!r} must not be empty")
+        return lines
+
     def text_lists(self, key: str, default: Any = None) -> list[list[str]]:
         value = self._take(key, list, default)
         if not all(
@@ -148,7 +163,8 @@ class Rule(ABC):
 class RequiredLines(Rule):
     """The file must contain a managed block, delimited by marker comments, holding `lines`.
 
-    The block is replaced as a whole on every fix, so changing `lines` in the
+    `lines` is one multi-line string, written into the block line by line. The
+    block is replaced as a whole on every fix, so changing `lines` in the
     central config updates every repository. Lines in `remove_lines` are deleted
     from the rest of the file.
     """
@@ -162,12 +178,9 @@ class RequiredLines(Rule):
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
-        lines = options.text_list("lines", REQUIRED)
-        if not lines:
-            raise ValueError("'lines' must not be empty")
         return cls(
             path=options.text("path", REQUIRED),
-            lines=lines,
+            lines=options.text_block("lines", REQUIRED),
             remove_lines=options.text_list("remove_lines", []),
             comment=options.text("comment", "#"),
             **common,

@@ -53,7 +53,7 @@ Exit codes: `0` compliant (or every finding has a pull request), `1` findings re
 
 | Type | Checks | Fix |
 | --- | --- | --- |
-| `required_lines` | `path` has a managed block (between `# >>> github-manager: <id>` and `# <<< github-manager: <id>`, comment prefix set by `comment`) holding exactly `lines`, and no line from `remove_lines` | replaces or appends the block, deletes the `remove_lines` |
+| `required_lines` | `path` has a managed block (between `# >>> github-manager: <id>` and `# <<< github-manager: <id>`, comment prefix set by `comment`) holding exactly `lines`, and no line from `remove_lines` (a list). `lines` is one multi-line literal string (`lines = '''` … `'''`), written into the block line by line: blank lines at the start and end and trailing spaces are dropped, blank lines inside are kept, and an indented line is a configuration error | replaces or appends the block, deletes the `remove_lines` |
 | `renovate_preset` | the Renovate config extends `preset` | rewrites only the `extends` array (drops `remove_extends`), or creates `renovate.json` |
 | `file_sync` | `path` equals the template file `source` | overwrites the file |
 | `repo_settings` | the repository settings in `settings` (booleans accepted by PyGithub's `Repository.edit`, e.g. `delete_branch_on_merge`) have the given values; optional `security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }` (only these two keys, `"enabled"` or `"disabled"`) is checked on **public repositories only** (private and internal ones are skipped: the features are paid there) | sets them directly on the repository, not by pull request (the security part in one request) |

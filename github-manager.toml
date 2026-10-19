@@ -61,8 +61,22 @@ id = "gitignore-baseline"
 type = "required_lines"
 path = ".gitignore"
 # Managed block between "# >>> github-manager: gitignore-baseline" and
-# "# <<< github-manager: gitignore-baseline"; it is replaced as a whole.
-lines = [".DS_Store", ".idea/", ".env", ".claude/", "!.claude/skills/"]
+# "# <<< github-manager: gitignore-baseline"; it is replaced as a whole. One literal
+# string, written line by line: no indentation, blank lines inside are kept.
+lines = '''
+.DS_Store
+.idea/
+.env
+
+# Claude Code - local configuration
+.claude/settings.local.json
+CLAUDE.local.md
+
+# ECC - temporary files
+.observer-tmp/
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+'''
 # Deleted from the rest of the file.
 remove_lines = [".claude/autoharness/"]
 exclude = []
