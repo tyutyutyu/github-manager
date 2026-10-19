@@ -713,7 +713,12 @@ WORKFLOW = ".github/workflows/ci.yml"
 
 
 def runners_rule(allowed=(("self-hosted",),), **options) -> SelfHostedRunners:
-    raw = {"id": "sh", "allowed_runs_on": [list(labels) for labels in allowed], **options}
+    raw = {
+        "id": "sh",
+        "allowed_runs_on": [list(labels) for labels in allowed],
+        "runs_on": ["self-hosted"],
+        **options,
+    }
     return SelfHostedRunners.from_options(raw, Path())
 
 
@@ -749,11 +754,13 @@ def test_self_hosted_runners_compare_as_sets_against_every_allowed_set(make_work
 @pytest.mark.parametrize(
     ("runs_on", "actual"),
     [
-        ("ubuntu-latest", '["ubuntu-latest"]'),
         ("windows-latest", '["windows-latest"]'),
-        ("[self-hosted, Linux, X64, zhukov]", '["self-hosted", "Linux", "X64", "zhukov"]'),
+        ("macos-latest", '["macos-latest"]'),
+        ("linux", '["linux"]'),
+        ("[Linux, X64]", '["Linux", "X64"]'),
+        ("[ubuntu-latest, ubuntu-22.04]", '["ubuntu-latest", "ubuntu-22.04"]'),
+        ("[ubuntu-latest, windows-latest]", '["ubuntu-latest", "windows-latest"]'),
         ("[]", "[]"),
-        ("[ubuntu-latest, self-hosted]", '["ubuntu-latest", "self-hosted"]'),
     ],
 )
 def test_self_hosted_runners_report_other_label_sets(make_workspace, runs_on, actual) -> None:
@@ -768,7 +775,7 @@ def test_self_hosted_runners_report_other_label_sets(make_workspace, runs_on, ac
 
 def test_self_hosted_runners_message_lists_every_allowed_set(make_workspace) -> None:
     rule = runners_rule(allowed=[("self-hosted",), ("self-hosted", "gpu")])
-    workspace = job_workspace(make_workspace, "  test:\n    runs-on: ubuntu-latest\n")
+    workspace = job_workspace(make_workspace, "  test:\n    runs-on: windows-latest\n")
     assert rule.apply(workspace)[0].message.endswith(
         '(allowed: ["self-hosted"] or ["self-hosted", "gpu"])'
     )
@@ -776,7 +783,7 @@ def test_self_hosted_runners_message_lists_every_allowed_set(make_workspace) -> 
 
 def test_self_hosted_runners_report_each_bad_job_once(make_workspace) -> None:
     jobs = (
-        "  a:\n    runs-on: ubuntu-latest\n"
+        "  a:\n    runs-on: windows-latest\n"
         "  b:\n    runs-on: self-hosted\n"
         "  c:\n    runs-on: macos-latest\n"
     )
@@ -937,8 +944,16 @@ def test_self_hosted_runners_report_unreadable_file(make_workspace) -> None:
     assert runners_rule().apply(workspace) == [manual(f"{WORKFLOW}: the file is not readable")]
 
 
-def test_self_hosted_runners_never_write(make_workspace) -> None:
+def test_self_hosted_runners_write_only_workflow_files(make_workspace) -> None:
     workspace = job_workspace(make_workspace, "  test:\n    runs-on: ubuntu-latest\n")
+    workspace.change_setting = lambda *args: pytest.fail("the rule must not change settings")
+    workspace.change_ruleset = lambda *args: pytest.fail("the rule must not change rulesets")
+    assert [finding.fixable for finding in runners_rule().apply(workspace)] == [True]
+    assert list(workspace.files) == [WORKFLOW]
+
+
+def test_self_hosted_runners_never_write_unfixable_jobs(make_workspace) -> None:
+    workspace = job_workspace(make_workspace, "  test:\n    runs-on: windows-latest\n")
     workspace.write = lambda *args: pytest.fail("the rule must not write")
     workspace.change_setting = lambda *args: pytest.fail("the rule must not change settings")
     workspace.change_ruleset = lambda *args: pytest.fail("the rule must not change rulesets")
@@ -948,7 +963,7 @@ def test_self_hosted_runners_never_write(make_workspace) -> None:
 @pytest.mark.parametrize(
     ("options", "message"),
     [
-        ({}, "missing required key 'allowed_runs_on'"),
+        ({"runs_on": ["self-hosted"]}, "missing required key 'allowed_runs_on'"),
         ({"allowed_runs_on": []}, "'allowed_runs_on' must not be empty"),
         ({"allowed_runs_on": "self-hosted"}, "'allowed_runs_on' must be of type list"),
         ({"allowed_runs_on": ["self-hosted"]}, "must be a list of non-empty lists"),
@@ -960,9 +975,270 @@ def test_self_hosted_runners_never_write(make_workspace) -> None:
             {"allowed_runs_on": [["self-hosted", "A"], ["a", "Self-Hosted"]]},
             r"duplicate 'allowed_runs_on' set: \[\"a\", \"Self-Hosted\"\]",
         ),
-        ({"allowed_runs_on": [["self-hosted"]], "typo": 1}, "unknown keys: typo"),
+        ({"allowed_runs_on": [["self-hosted"]]}, "missing required key 'runs_on'"),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": "self-hosted"},
+            "'runs_on' must be of type list",
+        ),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": []},
+            "'runs_on' must not be empty",
+        ),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": [""]},
+            "'runs_on' must be a list of non-empty strings",
+        ),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted", 1]},
+            "'runs_on' must be a list of non-empty strings",
+        ),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": ["ubuntu-latest"]},
+            r"'runs_on' \[\"ubuntu-latest\"\] must equal one of the 'allowed_runs_on' sets",
+        ),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted", "gpu"]},
+            "must equal one of the 'allowed_runs_on' sets",
+        ),
+        (
+            {"allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted"], "typo": 1},
+            "unknown keys: typo",
+        ),
     ],
 )
 def test_self_hosted_runners_reject_invalid_options(options, message) -> None:
     with pytest.raises(ValueError, match=message):
         SelfHostedRunners.from_options({"id": "sh", **options}, Path())
+
+
+def test_self_hosted_runners_accept_runs_on_matching_any_allowed_set_case_insensitively() -> None:
+    rule = runners_rule(
+        allowed=[("self-hosted",), ("self-hosted", "GPU")], runs_on=["gpu", "SELF-HOSTED"]
+    )
+    assert rule.runs_on == ["gpu", "SELF-HOSTED"]
+
+
+# --- self_hosted_runners: rewriting ------------------------------------------
+
+
+def fixed(finding_text: str) -> Finding:
+    return Finding("sh", finding_text)
+
+
+def rewritten(make_workspace, jobs: str, rule=None, **options):
+    workspace = job_workspace(make_workspace, jobs, **options)
+    findings = (rule or runners_rule()).apply(workspace)
+    return workspace.files[WORKFLOW], findings
+
+
+@pytest.mark.parametrize("visibility", ["private", "internal"])
+@pytest.mark.parametrize(
+    ("runs_on", "expected", "actual"),
+    [
+        ("ubuntu-latest", "self-hosted", '["ubuntu-latest"]'),
+        ("Ubuntu-22.04", "self-hosted", '["Ubuntu-22.04"]'),
+        ("[ubuntu-22.04]", "self-hosted", '["ubuntu-22.04"]'),
+        ('"ubuntu-latest"', "self-hosted", '["ubuntu-latest"]'),
+        ("'ubuntu-latest'", "self-hosted", '["ubuntu-latest"]'),
+        ("[ubuntu-latest, UBUNTU-latest]", "self-hosted", '["ubuntu-latest", "UBUNTU-latest"]'),
+        (
+            "[self-hosted, Linux, X64, zhukov]",
+            "self-hosted",
+            '["self-hosted", "Linux", "X64", "zhukov"]',
+        ),
+        ("[Linux, self-hosted]", "self-hosted", '["Linux", "self-hosted"]'),
+        ("[ubuntu-latest, self-hosted]", "self-hosted", '["ubuntu-latest", "self-hosted"]'),
+    ],
+)
+def test_self_hosted_runners_rewrite_replaceable_values(
+    make_workspace, visibility, runs_on, expected, actual
+) -> None:
+    text, findings = rewritten(
+        make_workspace, f"  test:\n    runs-on: {runs_on}\n", visibility=visibility
+    )
+    assert text == f"name: ci\non: push\njobs:\n  test:\n    runs-on: {expected}\n"
+    assert findings == [
+        fixed(
+            f"{WORKFLOW}: job test: runs-on {actual} is not an allowed self-hosted runner "
+            '(allowed: ["self-hosted"]); set runs-on to ["self-hosted"]'
+        )
+    ]
+
+
+def test_self_hosted_runners_rewrite_keeps_everything_else_byte_for_byte(make_workspace) -> None:
+    before = (
+        "# header   \n"
+        "name: ci\n"
+        "on:   push\n"
+        "jobs:\n"
+        "    test:   # the job\n"
+        "        name: Test\n"
+        "        runs-on:    ubuntu-latest   # trailing comment  \n"
+        "        steps:\n"
+        "            - run: echo runs-on ubuntu-latest\n"
+        "\n"
+    )
+    workspace = make_workspace(files={WORKFLOW: before}, settings={"visibility": "private"})
+    runners_rule().apply(workspace)
+    assert workspace.files[WORKFLOW] == before.replace(
+        "runs-on:    ubuntu-latest   #", "runs-on:    self-hosted   #"
+    )
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+@pytest.mark.parametrize("final_newline", [True, False])
+def test_self_hosted_runners_rewrite_keeps_line_endings(
+    make_workspace, ending, final_newline
+) -> None:
+    lines = [
+        "name: ci",
+        "on: push",
+        "jobs:",
+        "  a:",
+        "    runs-on: [self-hosted, Linux]  # c",
+        "  b:",
+        "    runs-on: ubuntu-latest",
+    ]
+    before = ending.join(lines) + (ending if final_newline else "")
+    workspace = make_workspace(files={WORKFLOW: before}, settings={"visibility": "private"})
+    findings = runners_rule().apply(workspace)
+    assert len(findings) == 2
+    after = workspace.files[WORKFLOW]
+    expected = before.replace("[self-hosted, Linux]", "self-hosted").replace(
+        "runs-on: ubuntu-latest", "runs-on: self-hosted"
+    )
+    assert after == expected
+    assert after.endswith(ending) is final_newline
+
+
+def test_self_hosted_runners_rewrite_several_jobs_in_one_write(make_workspace) -> None:
+    jobs = (
+        "  a:\n    runs-on: ubuntu-latest\n"
+        "  b:\n    runs-on: self-hosted\n"
+        "  c:\n    runs-on: [self-hosted, Linux, X64, zhukov]\n"
+    )
+    workspace = job_workspace(make_workspace, jobs)
+    writes = []
+    original = workspace.write
+    workspace.write = lambda path, content: (writes.append(path), original(path, content))
+    findings = runners_rule().apply(workspace)
+    assert writes == [WORKFLOW]
+    assert [finding.fixable for finding in findings] == [True, True]
+    assert [finding.message.split(": ")[1] for finding in findings] == ["job a", "job c"]
+    assert workspace.files[WORKFLOW].count("runs-on: self-hosted") == 3
+    assert runners_rule().apply(workspace) == []
+
+
+def test_self_hosted_runners_rewrite_to_flow_list_for_several_labels(make_workspace) -> None:
+    rule = runners_rule(
+        allowed=[("self-hosted",), ("self-hosted", "gpu")], runs_on=["self-hosted", "gpu"]
+    )
+    text, findings = rewritten(make_workspace, "  test:\n    runs-on: ubuntu-latest\n", rule)
+    assert text.endswith("    runs-on: [self-hosted, gpu]\n")
+    assert [finding.fixable for finding in findings] == [True]
+    assert (
+        rule.apply(make_workspace(files={WORKFLOW: text}, settings={"visibility": "private"})) == []
+    )
+
+
+def test_self_hosted_runners_rewrite_flow_style_job(make_workspace) -> None:
+    jobs = "  test: {runs-on: ubuntu-latest, steps: []}\n"
+    text, findings = rewritten(make_workspace, jobs)
+    assert text.endswith("  test: {runs-on: self-hosted, steps: []}\n")
+    assert [finding.fixable for finding in findings] == [True]
+
+
+def test_self_hosted_runners_rewrite_files_independently(make_workspace) -> None:
+    other = ".github/workflows/other.yaml"
+    bad = "name: x\njobs:\n  t:\n    runs-on: windows-latest\n"
+    good = "name: y\njobs:\n  t:\n    runs-on: ubuntu-latest\n"
+    workspace = make_workspace(
+        files={WORKFLOW: good, other: bad}, settings={"visibility": "private"}
+    )
+    findings = runners_rule().apply(workspace)
+    assert [(finding.fixable, finding.message.split(":")[0]) for finding in findings] == [
+        (True, WORKFLOW),
+        (False, other),
+    ]
+    assert workspace.files[WORKFLOW].endswith("runs-on: self-hosted\n")
+    assert workspace.files[other] == bad
+
+
+@pytest.mark.parametrize(
+    "jobs",
+    [
+        "  test:\n    runs-on:\n      - ubuntu-latest\n",
+        "  test:\n    runs-on:\n      - self-hosted\n      - Linux\n",
+        "  test:\n    runs-on: [ubuntu-latest,\n      ]\n",
+        "  test:\n    runs-on:\n      ubuntu-latest\n",
+        "  test:\n    runs-on: >-\n      ubuntu-latest\n",
+        "  a:\n    runs-on: &r ubuntu-latest\n  b:\n    runs-on: *r\n",
+        "  test:\n    runs-on: &r [ubuntu-latest]\n",
+        "  test:\n    runs-on: !!str ubuntu-latest\n",
+        "  test:\n    env:\n      X: &runner ubuntu-latest\n    runs-on: [*runner]\n",
+        "  a:\n    runs-on: [&r ubuntu-latest]\n  b:\n    runs-on: [*r]\n",
+        "  test:\n    runs-on: [!!str ubuntu-latest]\n",
+        "  a: &job\n    runs-on: ubuntu-latest    # keep\n  b: *job\n",
+    ],
+)
+def test_self_hosted_runners_do_not_rewrite_unsafe_values(make_workspace, jobs) -> None:
+    before = f"name: ci\non: push\njobs:\n{jobs}"
+    workspace = make_workspace(files={WORKFLOW: before}, settings={"visibility": "private"})
+    workspace.write = lambda *args: pytest.fail("an unsafe value must not be rewritten")
+    findings = runners_rule().apply(workspace)
+    assert findings
+    assert not any(finding.fixable for finding in findings)
+    assert all(finding.message.endswith("; cannot rewrite safely") for finding in findings)
+    assert workspace.files[WORKFLOW] == before
+
+
+def test_self_hosted_runners_report_alias_users_without_touching_them(make_workspace) -> None:
+    jobs = "  a:\n    runs-on: &r ubuntu-latest\n  b:\n    runs-on: *r\n"
+    _, findings = rewritten(make_workspace, jobs)
+    assert [finding.message.split(":")[1] for finding in findings] == [" job a", " job b"]
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        "runs-on: windows-latest",
+        "runs-on: macos-14",
+        "runs-on: [self-hosted, '${{ matrix.os }}']",
+        "runs-on: ${{ matrix.os }}",
+        "runs-on: {group: g}",
+        "runs-on: [ubuntu-latest, {a: b}]",
+        "runs-on: [ubuntu-latest, windows-latest]",
+        "uses: org/repo/.github/workflows/w.yml@main",
+    ],
+)
+def test_self_hosted_runners_leave_other_jobs_manual_without_writing(make_workspace, job) -> None:
+    before = f"name: ci\non: push\njobs:\n  test:\n    {job}\n"
+    workspace = make_workspace(files={WORKFLOW: before}, settings={"visibility": "private"})
+    workspace.write = lambda *args: pytest.fail("the rule must not write")
+    findings = runners_rule().apply(workspace)
+    assert len(findings) == 1
+    assert not findings[0].fixable
+    assert not findings[0].message.endswith("cannot rewrite safely")
+
+
+def test_self_hosted_runners_mixed_file_rewrites_fixable_and_reports_rest(make_workspace) -> None:
+    jobs = "  a:\n    runs-on: ubuntu-latest\n  b:\n    runs-on: windows-latest\n"
+    text, findings = rewritten(make_workspace, jobs)
+    assert text.endswith("  a:\n    runs-on: self-hosted\n  b:\n    runs-on: windows-latest\n")
+    assert [finding.fixable for finding in findings] == [False, True]
+
+
+def test_self_hosted_runners_do_not_write_when_the_check_after_rewriting_fails(
+    make_workspace,
+) -> None:
+    # `runs_on` is allowed, but a bare `true` loads as a boolean, so the rewritten job
+    # would still be undecidable: the file must stay as it is.
+    rule = runners_rule(allowed=[("self-hosted", "true")], runs_on=["self-hosted", "true"])
+    before = "name: ci\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+    workspace = make_workspace(files={WORKFLOW: before}, settings={"visibility": "private"})
+    workspace.write = lambda *args: pytest.fail("a failed check must not write")
+    findings = rule.apply(workspace)
+    assert len(findings) == 1
+    assert not findings[0].fixable
+    assert findings[0].message.endswith("; cannot rewrite safely")
+    assert workspace.files[WORKFLOW] == before

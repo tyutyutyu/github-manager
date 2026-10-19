@@ -77,6 +77,7 @@ def test_repository_config_file_is_valid() -> None:
     assert isinstance(runners, SelfHostedRunners)
     assert runners.id == "private-self-hosted-runners"
     assert runners.allowed_runs_on == [["self-hosted"]]
+    assert runners.runs_on == ["self-hosted"]
 
 
 def test_defaults_apply(tmp_path: Path) -> None:
@@ -135,7 +136,11 @@ def test_visibility_owners_match_case_insensitively_and_may_be_partial() -> None
         {"allowed_runs_on": [[""]]},
         {"allowed_runs_on": [["linux"]]},
         {"allowed_runs_on": [["self-hosted"], ["Self-Hosted"]]},
-        {"allowed_runs_on": [["self-hosted"]], "typo": 1},
+        {"allowed_runs_on": [["self-hosted"]]},
+        {"allowed_runs_on": [["self-hosted"]], "runs_on": []},
+        {"allowed_runs_on": [["self-hosted"]], "runs_on": [""]},
+        {"allowed_runs_on": [["self-hosted"]], "runs_on": ["ubuntu-latest"]},
+        {"allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted"], "typo": 1},
     ],
 )
 def test_invalid_self_hosted_runners_options_are_config_errors(options) -> None:

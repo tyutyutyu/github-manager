@@ -2,10 +2,12 @@
 
 import argparse
 import os
-import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
+
+from rich.console import Console
+from rich.text import Text
 
 from github_manager.config import DEFAULT_CONFIG_PATH, ConfigError, load_config
 from github_manager.engine import GitHubApi, Outcome, RepoReport, process_repo, select_repos
@@ -16,6 +18,28 @@ EXIT_FINDINGS = 1
 EXIT_ERROR = 2
 
 ApiFactory = Callable[[], GitHubApi]
+
+# Symbol and style of each outcome, in the order the summary lists them.
+OUTCOME_STYLES = {
+    Outcome.COMPLIANT: ("✔", "green"),
+    Outcome.PR_CLOSED: ("✔", "green"),
+    Outcome.PR_UP_TO_DATE: ("✔", "cyan"),
+    Outcome.PR_CREATED: ("✚", "cyan"),
+    Outcome.PR_UPDATED: ("↻", "cyan"),
+    Outcome.SETTINGS_UPDATED: ("↻", "cyan"),
+    Outcome.NEEDS_FIX: ("✖", "yellow"),
+    Outcome.SKIPPED: ("○", "dim"),
+    Outcome.ERROR: ("✖", "bold red"),
+}
+
+
+def _console(*, stderr: bool = False) -> Console:
+    """Colours on a terminal and in GitHub Actions (its log is no TTY but shows ANSI
+    colours), none in a pipe or with NO_COLOR; long lines are never wrapped."""
+    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    return Console(
+        stderr=stderr, force_terminal=True if in_actions else None, soft_wrap=True, highlight=False
+    )
 
 
 def _default_api() -> GitHubApi:
@@ -46,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
         )
     for command in (check, fix):
         command.add_argument(
+            "-v", "--verbose", action="store_true", help="also list compliant repositories"
+        )
+        command.add_argument(
             "-r",
             "--repo",
             action="append",
@@ -57,17 +84,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_api) -> int:
     args = build_parser().parse_args(argv)
+    console = _console()
     try:
         config = load_config(args.config)
         api = api_factory()
         repos = select_repos(api, config, getattr(args, "repo", []), args.owner)
     except (ConfigError, GitHubError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _console(stderr=True).print(Text(f"error: {exc}", style="bold red"))
         return EXIT_ERROR
 
     if args.command == "repos":
         for repo in repos:
-            print(f"{repo.full_name} ({repo.default_branch})")
+            console.print(
+                Text.assemble((repo.full_name, "bold"), (f" ({repo.default_branch})", "dim"))
+            )
         return EXIT_OK
 
     fix = args.command == "fix"
@@ -75,9 +105,10 @@ def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_a
     for repo in repos:
         report = process_repo(api, config, repo, fix=fix)
         reports.append(report)
-        _print_report(report, show_diff=getattr(args, "diff", False))
+        if report.outcome is not Outcome.COMPLIANT or args.verbose:
+            _print_report(console, report, show_diff=getattr(args, "diff", False))
 
-    _print_summary(reports)
+    _print_summary(console, reports)
     _write_step_summary(reports)
     if any(report.outcome is Outcome.ERROR for report in reports):
         return EXIT_ERROR
@@ -85,21 +116,45 @@ def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_a
     return EXIT_FINDINGS if any(unresolved) else EXIT_OK
 
 
-def _print_report(report: RepoReport, *, show_diff: bool) -> None:
-    detail = f" ({report.detail})" if report.detail else ""
-    print(f"{report.repo}: {report.outcome}{detail}")
+def _print_report(console: Console, report: RepoReport, *, show_diff: bool) -> None:
+    symbol, style = OUTCOME_STYLES[report.outcome]
+    header = Text.assemble(
+        (symbol, style), " ", (report.repo, "bold"), "  ", (report.outcome, style)
+    )
+    if report.detail:
+        header.append(f"  {report.detail}", style="dim")
+    console.print(header)
+    width = max((len(finding.rule_id) for finding in report.findings), default=0)
     for finding in report.findings:
-        marker = "fix" if finding.fixable else "manual"
-        print(f"  [{marker}] {finding.rule_id}: {finding.message}")
+        marker = ("fix   ", "yellow") if finding.fixable else ("manual", "bold red")
+        padding = " " * (width - len(finding.rule_id) + 2)
+        line = Text.assemble("    ", marker, "  ", (finding.rule_id, "bold"), padding)
+        console.print(line.append(finding.message))
     if show_diff:
         for diff in report.diffs:
-            print("    " + diff.rstrip("\n").replace("\n", "\n    "))
+            for diff_line in diff.rstrip("\n").split("\n"):
+                console.print(Text("      " + diff_line, style=_diff_style(diff_line)))
 
 
-def _print_summary(reports: list[RepoReport]) -> None:
+def _diff_style(line: str) -> str:
+    if line.startswith(("+++", "---")):
+        return "bold"
+    if line.startswith("@@"):
+        return "cyan"
+    if line.startswith("+"):
+        return "green"
+    if line.startswith("-"):
+        return "red"
+    return ""
+
+
+def _print_summary(console: Console, reports: list[RepoReport]) -> None:
     counts = Counter(report.outcome for report in reports)
-    summary = ", ".join(f"{count} {outcome}" for outcome, count in sorted(counts.items()))
-    print(f"\n{len(reports)} repositories: {summary or 'none'}")
+    summary = Text.assemble("\n", (f"{len(reports)} repositories", "bold"))
+    for outcome, (symbol, style) in OUTCOME_STYLES.items():
+        if counts[outcome]:
+            summary.append(f"  {symbol} {counts[outcome]} {outcome}", style=style)
+    console.print(summary)
 
 
 def _write_step_summary(reports: list[RepoReport]) -> None:
