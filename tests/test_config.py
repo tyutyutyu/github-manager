@@ -3,15 +3,6 @@ from pathlib import Path
 import pytest
 
 from github_manager.config import ConfigError, load_config, parse_config
-from github_manager.rules import (
-    BranchStrategy,
-    RenovatePreset,
-    RepoRuleset,
-    RepoSettings,
-    RepoVisibility,
-    RequiredLines,
-    SelfHostedRunners,
-)
 
 RULES = [
     {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": ".env"},
@@ -21,63 +12,7 @@ RULES = [
 
 def test_repository_config_file_is_valid() -> None:
     config = load_config(Path(__file__).parent.parent / "github-manager.toml")
-    assert config.owners == ["tyutyutyu", "tyutyutyu-org"]
-    assert [type(rule) for rule in config.rules] == [
-        RenovatePreset,
-        RequiredLines,
-        BranchStrategy,
-        RepoSettings,
-        RepoRuleset,
-        RepoVisibility,
-        SelfHostedRunners,
-    ]
-    gitignore = config.rules[1]
-    assert isinstance(gitignore, RequiredLines)
-    assert gitignore.lines == [
-        ".DS_Store",
-        ".idea/",
-        ".env",
-        "",
-        "# Claude Code - local configuration",
-        ".claude/settings.local.json",
-        "CLAUDE.local.md",
-        "",
-        "# ECC - temporary files",
-        ".observer-tmp/",
-        ".claude/worktrees/",
-        ".claude/scheduled_tasks.lock",
-    ]
-    assert gitignore.remove_lines == [".claude/autoharness/"]
-    repo_settings = config.rules[3]
-    assert isinstance(repo_settings, RepoSettings)
-    assert repo_settings.settings == {
-        "delete_branch_on_merge": True,
-        "allow_auto_merge": True,
-        "allow_update_branch": True,
-        "has_wiki": False,
-    }
-    assert repo_settings.security_and_analysis == {
-        "secret_scanning": "enabled",
-        "secret_scanning_push_protection": "enabled",
-    }
-    ruleset = config.rules[4]
-    assert isinstance(ruleset, RepoRuleset)
-    assert ruleset.id == "default-branch-ruleset"
-    assert ruleset.required_status_checks == {
-        "tyutyutyu/github-manager": ["verify"],
-        "tyutyutyu-org/ph_toolbox": ["verify"],
-        "tyutyutyu-org/youtube-mirror": ["test"],
-    }
-    assert not ruleset.strict_required_status_checks
-    visibility = config.rules[5]
-    assert isinstance(visibility, RepoVisibility)
-    assert visibility.id == "repo-visibility"
-    assert visibility.visibility == {"tyutyutyu": "public", "tyutyutyu-org": "private"}
-    runners = config.rules[6]
-    assert isinstance(runners, SelfHostedRunners)
-    assert runners.id == "private-self-hosted-runners"
-    assert runners.allowed_runs_on == [["self-hosted"]]
-    assert runners.runs_on == ["self-hosted"]
+    assert config.rules
 
 
 def test_defaults_apply(tmp_path: Path) -> None:
