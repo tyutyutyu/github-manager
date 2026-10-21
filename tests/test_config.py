@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from github_manager.config import ConfigError, load_config, parse_config
+from github_manager.rules import RepoRuleset
 
 RULES = [
     {"id": "gi", "type": "required_lines", "path": ".gitignore", "lines": ".env"},
@@ -82,6 +83,20 @@ def test_invalid_self_hosted_runners_options_are_config_errors(options) -> None:
     rule = {"id": "sh", "type": "self_hosted_runners", **options}
     with pytest.raises(ConfigError, match="rule sh:"):
         parse_config({"owners": ["me"], "rules": [rule]}, Path())
+
+
+@pytest.mark.parametrize("value", ["", 1, ["verify"]])
+def test_invalid_required_workflow_check_is_a_config_error(value) -> None:
+    rule = {"id": "dr", "type": "repo_ruleset", "required_workflow_check": value}
+    with pytest.raises(ConfigError, match="rule dr: 'required_workflow_check'"):
+        parse_config({"owners": ["me"], "rules": [rule]}, Path())
+
+
+def test_required_workflow_check_is_accepted() -> None:
+    rule = {"id": "dr", "type": "repo_ruleset", "required_workflow_check": "verify"}
+    [parsed] = parse_config({"owners": ["me"], "rules": [rule]}, Path()).rules
+    assert isinstance(parsed, RepoRuleset)
+    assert parsed.required_workflow_check == "verify"
 
 
 def test_missing_and_malformed_files(tmp_path: Path) -> None:
