@@ -21,7 +21,6 @@ exclude = [
     "tyutyutyu/msps",
     "tyutyutyu/news-indexer-page-parsers",
     "tyutyutyu/pdf-titan",
-    "tyutyutyu/photo-backup",
     "tyutyutyu/release-notes-news",
     "tyutyutyu/relevant-tools",
     "tyutyutyu/task-center",
@@ -64,9 +63,10 @@ path = ".gitignore"
 # "# <<< github-manager: gitignore-baseline"; it is replaced as a whole. One literal
 # string, written line by line: no indentation, blank lines inside are kept.
 lines = '''
-.DS_Store
-.idea/
+# dotenv environment variable files
 .env
+.env.*
+!.env.example
 
 # Claude Code - local configuration
 .claude/settings.local.json
