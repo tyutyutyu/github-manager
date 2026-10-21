@@ -117,6 +117,11 @@ class RemoteWorkspace:
             path for path in self._paths | self._written.keys() if path.startswith(prefix)
         )
 
+    def original_paths(self, prefix: str) -> list[str] | None:
+        if self._paths is None:
+            return None
+        return sorted(path for path in self._paths if path.startswith(prefix))
+
     def setting(self, name: str) -> Any:
         if self._settings is None:
             self._settings = self._api.repo_settings(self._repo)

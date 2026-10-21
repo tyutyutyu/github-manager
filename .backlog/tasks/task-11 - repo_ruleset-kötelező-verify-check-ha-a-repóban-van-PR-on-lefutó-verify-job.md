@@ -1,10 +1,10 @@
 ---
 id: TASK-11
 title: 'repo_ruleset: kötelező verify check, ha a repóban van PR-on lefutó verify job'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21T18:14:00Z'
-updated_date: '2026-10-21T19:13:00Z'
+updated_date: '2026-10-21T22:48:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -73,16 +73,30 @@ A `repo_ruleset` szabály egy új opcióval (`required_workflow_check = "verify"
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 required_workflow_check opcionális repo_ruleset kulcs; hiányában a payload változatlan, üres string config-hiba
-- [ ] #2 Érvényes verify job esetén a menedzselt ruleset required_status_checks listája tartalmazza a verify-t a glob-unióval együtt, rendezve, duplikáció nélkül
-- [ ] #3 Mátrix, reusable uses, hiányzó pull_request trigger, paths szűrő, nem illeszkedő branches szűrő, nagybetűs Verify, hiányzó workflow, listázhatatlan fa és YAML-hiba esetén a verify nem kerül a rulesetbe, és fixable=False finding nevezi meg az okot
-- [ ] #4 A szabályból lekérdezhető, hogy egy repóban a verify kötelező-e; tesztelve igaz és hamis esetre
-- [ ] #5 A github-manager.toml-ban required_workflow_check = verify, a csak verify-t előíró glob bejegyzések törölve
-- [ ] #6 README és a github-manager-rules skill leírja a verify check feltételeit
+- [x] #1 required_workflow_check opcionális repo_ruleset kulcs; hiányában a payload változatlan, üres string config-hiba
+- [x] #2 Érvényes verify job esetén a menedzselt ruleset required_status_checks listája tartalmazza a verify-t a glob-unióval együtt, rendezve, duplikáció nélkül
+- [x] #3 Mátrix, reusable uses, hiányzó pull_request trigger, paths szűrő, nem illeszkedő branches szűrő, nagybetűs Verify, hiányzó workflow, listázhatatlan fa és YAML-hiba esetén a verify nem kerül a rulesetbe, és fixable=False finding nevezi meg az okot
+- [x] #4 A szabályból lekérdezhető, hogy egy repóban a verify kötelező-e; tesztelve igaz és hamis esetre
+- [x] #5 A github-manager.toml-ban required_workflow_check = verify, a csak verify-t előíró glob bejegyzések törölve
+- [x] #6 README és a github-manager-rules skill leírja a verify check feltételeit
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-11-repo-ruleset-kotelezo-verify-check-ha-a-repoban.
+
+Finalization: uv run ruff format -q . exit 0 and task verify exit 0 (390 passed, coverage 99.28%, ruff/ty/deptry/audit/build ok). Format run changed no tracked/untracked path (git status identical before/after). Files changed: rules.py, engine.py, conftest.py, test_rules.py, test_engine.py, test_config.py, README.md, github-manager.toml, this task file; the github-manager-rules SKILL.md is git-ignored (.gitignore:265 .claude/) but read and describes the conditions. Correction: the earlier Modified files list omitted engine.py and tests/conftest.py (original_paths/original default-branch accessors).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+required_workflow_check option added to repo_ruleset. rules.py statically analyses default-branch workflows (pull_request trigger, branches/types/paths filters, exact job check name, no matrix/reusable) and adds verify to the sorted, de-duplicated check union only when valid; otherwise a fixable=False finding names the cause. RepoRuleset.requires_workflow_check answers whether verify is required (for TASK-10). The analysis reads only the default-branch commit (new original/original_paths accessors in engine.py). github-manager.toml now sets required_workflow_check = verify and drops the verify-only globs. README and the skill document the conditions. Verified: ruff format exit 0 and task verify exit 0 in this session (390 tests, 99.28% coverage). Not run: uv run github-manager repos (live-config load). Risk: static analysis does not see job if: skips.
+<!-- SECTION:FINAL_SUMMARY:END -->

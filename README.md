@@ -57,7 +57,7 @@ Exit codes: `0` compliant (or every finding has a pull request), `1` findings re
 | `renovate_preset` | the Renovate config extends `preset` | rewrites only the `extends` array (drops `remove_extends`), or creates `renovate.json` |
 | `file_sync` | `path` equals the template file `source` | overwrites the file |
 | `repo_settings` | the repository settings in `settings` (booleans accepted by PyGithub's `Repository.edit`, e.g. `delete_branch_on_merge`) have the given values; optional `security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }` (only these two keys, `"enabled"` or `"disabled"`) is checked on **public repositories only** (private and internal ones are skipped: the features are paid there) | sets them directly on the repository, not by pull request (the security part in one request) |
-| `repo_ruleset` | the default branch has a ruleset named `github-manager: <id>` that forbids deletion and force pushes and requires a pull request (0 approvals, conversations resolved, squash merge only), with no bypass actors; optional `required_status_checks = { "<glob>" = ["<check>", ...] }` (globs match the repo name or `OWNER/NAME`; a repository gets the sorted union of all matching globs' checks, none if nothing matches) and `strict_required_status_checks` (default `false`) | creates or replaces that ruleset directly on the repository, not by pull request; other (manual, organization) rulesets are never touched. A private repository on the GitHub Free plan has no rulesets: reported as *manual* |
+| `repo_ruleset` | the default branch has a ruleset named `github-manager: <id>` that forbids deletion and force pushes and requires a pull request (0 approvals, conversations resolved, squash merge only), with no bypass actors; optional `required_status_checks = { "<glob>" = ["<check>", ...] }` (globs match the repo name or `OWNER/NAME`; a repository gets the sorted union of all matching globs' checks, none if nothing matches), `required_workflow_check = "<check>"` (e.g. `verify`: added to the required checks, sorted and without duplicates, only when the default branch has a workflow that certainly runs that check on pull requests; otherwise reported as *manual* and left out) and `strict_required_status_checks` (default `false`) | creates or replaces that ruleset directly on the repository, not by pull request; other (manual, organization) rulesets are never touched. A private repository on the GitHub Free plan has no rulesets: reported as *manual* |
 | `branch_strategy` | the default branch is `default_branch` (default `main`) and none of `forbidden_branches` (default `["develop"]`) exists | none: reported as *manual* |
 | `repo_visibility` | the repository has the visibility given by `visibility = { "<owner>" = "public" \| "private" }` for its owner (case-insensitive; owners missing from the table are not checked, and every key must be listed in `owners`) | none: reported as *manual* (changing the visibility or transferring the repository is a human decision) |
 | `self_hosted_runners` | in private and internal repositories (public ones are not checked), the `runs-on` of every job in `.github/workflows/*.yml\|*.yaml` equals one of the label sets in `allowed_runs_on = [["self-hosted"]]` (exact match as a set, case-insensitive; every set must contain `self-hosted`) | rewrites the `runs-on` of a job to `runs_on` (required, e.g. `["self-hosted"]`; it must equal one of the `allowed_runs_on` sets) in the pull request when it is a single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed (e.g. `[self-hosted, Linux, X64, zhukov]`) and the value sits on the same line as the `runs-on` key (a scalar or a one-line list); only that value changes, the rest of the file stays byte for byte the same, and the file is re-parsed to check the result before it is written. Everything else is reported as *manual* (see below); local `uses: ./...` calls are skipped |
@@ -75,6 +75,27 @@ alias, an anchor or a tag).
 can push to a default branch directly, only a pull request can change it. Check names in
 `required_status_checks` must be checks that report on the default branch, otherwise
 no pull request can be merged.
+
+`required_workflow_check` is decided statically from the workflow files directly under
+`.github/workflows/` (`.yml`/`.yaml`) of the default branch commit, never from live check
+runs or from files another rule writes in the pending pull request. The check is added
+only when at least one file has:
+
+- a `pull_request` trigger (`on` as a string, list or mapping) without a `paths` or
+  `paths-ignore` filter (the check would stay pending on other pull requests) and whose
+  `branches`/`branches-ignore` filter still runs on the default branch, and whose `types`
+  filter, if any, includes `opened`, `synchronize` and `reopened` (the defaults);
+- a job whose check name is exactly the configured name (case matters): its `name:`, or its
+  id when it has no `name:`; the name is not the workflow name or the file name and has no
+  `${{` expression;
+- that job is neither a matrix job (`verify (<value>)`) nor a reusable workflow call
+  (`verify / <job>`).
+
+Otherwise the finding `required check verify is not added: ...` names the closest cause
+(no such job, matrix, reusable call, no `pull_request` trigger, types filter, path
+filter, branch filter, unlistable file tree, invalid YAML) and the rest of the ruleset is
+still applied.
+A job skipped by `if:` is not detected; GitHub counts a skipped job as passing.
 
 ## Scheduled run
 

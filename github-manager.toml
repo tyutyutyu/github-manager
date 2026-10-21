@@ -109,7 +109,15 @@ type = "repo_ruleset"
 # request. Other rulesets are left alone. Needs a token with Administration: read/write.
 # Required checks per repository (glob on the name or OWNER/NAME); only names that report
 # on the default branch, otherwise no pull request can be merged there.
-required_status_checks = { "tyutyutyu/github-manager" = ["verify"], "tyutyutyu-org/ph_toolbox" = ["verify"], "tyutyutyu-org/project-manager" = ["verify"], "tyutyutyu-org/youtube-mirror" = ["test"] }
+required_status_checks = { "tyutyutyu-org/youtube-mirror" = ["test"] }
+# The `verify` check is required only where a workflow on the default branch certainly runs
+# it on pull requests; otherwise it is reported ([manual]) and left out. The check name is
+# the job's `name:` (its id without one), not the workflow name or file name. A matrix job
+# (`verify (<value>)`) and a reusable workflow call (`verify / <job>`) do not count, nor
+# does a `pull_request` trigger with a `paths`/`paths-ignore` filter, one whose
+# `branches` filter skips the default branch, or one whose `types` filter leaves out
+# opened, synchronize or reopened. Case matters.
+required_workflow_check = "verify"
 strict_required_status_checks = false
 exclude = []
 

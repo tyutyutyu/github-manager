@@ -223,6 +223,8 @@ class MemoryWorkspace:
         listable: bool = True,
     ) -> None:
         self.files = dict(files or {})
+        # The default branch commit: `write` changes only `files`.
+        self.original_files = dict(self.files)
         self.full_name = full_name
         # Each item is a full server ruleset.
         self.ruleset_items = rulesets or []
@@ -246,6 +248,14 @@ class MemoryWorkspace:
         if not self.listable:
             return None
         return sorted(path for path in self.files if path.startswith(prefix))
+
+    def original(self, path: str) -> str | None:
+        return self.original_files.get(path)
+
+    def original_paths(self, prefix: str) -> list[str] | None:
+        if not self.listable:
+            return None
+        return sorted(path for path in self.original_files if path.startswith(prefix))
 
     def setting(self, name: str) -> Any:
         return self.settings.get(name)

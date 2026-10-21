@@ -7,6 +7,7 @@ from github_manager.engine import Outcome, RemoteWorkspace, process_repo, select
 from github_manager.github import GitHubError
 from github_manager.rules import (
     BranchStrategy,
+    FileSync,
     RenovatePreset,
     RepoRuleset,
     RepoSettings,
@@ -32,6 +33,9 @@ VISIBILITY_RULE = RepoVisibility.from_options(
 RUNNERS_RULE = SelfHostedRunners.from_options(
     {"id": "sh", "allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted"]}, Path()
 )
+VERIFY_RULE = RepoRuleset.from_options({"id": "dr", "required_workflow_check": "verify"}, Path())
+VERIFY_PATH = ".github/workflows/verify.yml"
+VERIFY_WORKFLOW = "on: pull_request\njobs:\n  verify:\n    runs-on: ubuntu-latest\n"
 UBUNTU_WORKFLOW = "jobs:\n  test:\n    runs-on: ubuntu-latest\n"
 
 
@@ -385,6 +389,100 @@ def test_ruleset_with_server_defaults_is_compliant(fake_github) -> None:
     report = process_repo(fake_github, ruleset_config(), repo_named(fake_github, "app"), fix=True)
     assert report.outcome is Outcome.COMPLIANT
     assert fake_github.calls == []
+
+
+def required_contexts(ruleset: dict) -> list[str]:
+    return [
+        item["context"]
+        for rule in ruleset["rules"]
+        if rule["type"] == "required_status_checks"
+        for item in rule["parameters"]["required_status_checks"]
+    ]
+
+
+def test_fix_requires_verify_when_the_workflow_runs_on_pull_requests(fake_github) -> None:
+    config = ruleset_config(VERIFY_RULE)
+    name = fake_github.add_repo("app", {VERIFY_PATH: VERIFY_WORKFLOW})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert [f.message for f in report.findings] == [f"ruleset {RULESET_NAME} is missing"]
+    [ruleset] = fake_github.repos[name].rulesets.values()
+    assert required_contexts(ruleset) == ["verify"]
+
+    again = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert again.outcome is Outcome.COMPLIANT
+
+
+def test_fix_leaves_verify_out_when_the_workflow_does_not_run_on_pull_requests(
+    fake_github,
+) -> None:
+    config = ruleset_config(VERIFY_RULE)
+    name = fake_github.add_repo(
+        "app", {VERIFY_PATH: VERIFY_WORKFLOW.replace("pull_request", "push")}
+    )
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert [(f.message, f.fixable) for f in report.findings] == [
+        (f"ruleset {RULESET_NAME} is missing", True),
+        (
+            f"required check verify is not added: {VERIFY_PATH}: no pull_request trigger",
+            False,
+        ),
+    ]
+    [ruleset] = fake_github.repos[name].rulesets.values()
+    assert required_contexts(ruleset) == []
+    assert [call for call in fake_github.calls if "ruleset" in call] == [
+        f"create ruleset {RULESET_NAME}"
+    ]
+
+
+def test_verify_check_with_an_unlistable_tree_is_manual(fake_github) -> None:
+    fake_github.add_repo("app", {VERIFY_PATH: VERIFY_WORKFLOW}, tree_listable=False)
+
+    report = process_repo(
+        fake_github, ruleset_config(VERIFY_RULE), repo_named(fake_github, "app"), fix=False
+    )
+    assert [(f.message, f.fixable) for f in report.findings][1:] == [
+        (
+            "required check verify is not added: .github/workflows/: the workflow files "
+            "cannot be listed",
+            False,
+        )
+    ]
+
+
+def test_verify_written_by_an_earlier_rule_is_not_required_yet(fake_github, tmp_path) -> None:
+    (tmp_path / "verify.yml").write_text(VERIFY_WORKFLOW, encoding="utf-8")
+    sync = FileSync.from_options(
+        {"id": "fs", "path": VERIFY_PATH, "source": "verify.yml"}, tmp_path
+    )
+    config = ruleset_config(sync, VERIFY_RULE)
+    name = fake_github.add_repo("app", {})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert [(f.message, f.fixable) for f in report.findings] == [
+        (f"{VERIFY_PATH}: missing", True),
+        (f"ruleset {RULESET_NAME} is missing", True),
+        (
+            "required check verify is not added: .github/workflows/: no workflow file "
+            "(.yml or .yaml)",
+            False,
+        ),
+    ]
+    [ruleset] = fake_github.repos[name].rulesets.values()
+    assert required_contexts(ruleset) == []
+
+
+def test_ruleset_is_outdated_once_the_verify_workflow_appears(fake_github) -> None:
+    config = ruleset_config(VERIFY_RULE)
+    name = fake_github.add_repo("app", {VERIFY_PATH: VERIFY_WORKFLOW})
+    fake_github.add_ruleset(name, VERIFY_RULE.payload(name, []))
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert [f.message for f in report.findings] == [f"ruleset {RULESET_NAME} is outdated"]
+    [ruleset] = fake_github.repos[name].rulesets.values()
+    assert required_contexts(ruleset) == ["verify"]
 
 
 def test_ruleset_unavailable_and_duplicate_are_manual_not_errors(fake_github) -> None:

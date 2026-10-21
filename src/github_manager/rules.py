@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, ClassVar, Protocol, Self
+from typing import Any, ClassVar, NamedTuple, Protocol, Self
 
 import yaml
 
@@ -33,6 +33,14 @@ class Workspace(Protocol):
     def write(self, path: str, content: str) -> None: ...
 
     def paths(self, prefix: str) -> list[str] | None: ...
+
+    def original(self, path: str) -> str | None:
+        """The file on the default branch commit, without pending writes."""
+        ...
+
+    def original_paths(self, prefix: str) -> list[str] | None:
+        """The paths on the default branch commit, without pending writes."""
+        ...
 
     def setting(self, name: str) -> Any: ...
 
@@ -520,12 +528,18 @@ class RepoRuleset(Rule):
     `required_status_checks` maps repository globs (name or OWNER/NAME) to check names;
     a repository gets the union of the checks of every matching glob. Other rulesets are
     never touched. Fixes are applied to the repository directly, not by pull request.
+
+    `required_workflow_check` names a check (e.g. `verify`) that is added to the required
+    checks only when a workflow on the default branch certainly runs it on pull requests
+    (see `workflow_check_problem`); otherwise a manual finding says what is missing, because
+    a required check that never reports blocks every merge.
     """
 
     type_name: ClassVar[str] = "repo_ruleset"
 
     required_status_checks: dict[str, list[str]] = field(default_factory=dict)
     strict_required_status_checks: bool = False
+    required_workflow_check: str | None = None
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
@@ -545,6 +559,7 @@ class RepoRuleset(Rule):
         return cls(
             required_status_checks=checks,
             strict_required_status_checks=options.flag("strict_required_status_checks", False),
+            required_workflow_check=options.text("required_workflow_check", None),
             **common,
         )
 
@@ -563,7 +578,37 @@ class RepoRuleset(Rule):
             }
         )
 
-    def payload(self, full_name: str) -> dict[str, Any]:
+    def workflow_check_problem(self, workspace: Workspace) -> str | None:
+        """Why the workflow check cannot be required in this repository; None when it can.
+
+        Also None when the rule has no `required_workflow_check`: use `requires_workflow_check`
+        to ask whether the check is required.
+        """
+        if self.required_workflow_check is None:
+            return None
+        return _workflow_check_problem(
+            workspace, self.required_workflow_check, workspace.default_branch
+        )
+
+    def requires_workflow_check(self, workspace: Workspace) -> bool:
+        """True when the managed ruleset requires the workflow check in this repository.
+
+        False where rulesets are not available, because then no ruleset requires it.
+        """
+        return (
+            self.required_workflow_check is not None
+            and workspace.rulesets() is not None
+            and self.workflow_check_problem(workspace) is None
+        )
+
+    def _checks(self, full_name: str, workflow_check: bool) -> list[str]:
+        checks = set(self.checks_for(full_name))
+        if workflow_check and self.required_workflow_check is not None:
+            checks.add(self.required_workflow_check)
+        return sorted(checks)
+
+    def payload(self, full_name: str, checks: list[str] | None = None) -> dict[str, Any]:
+        """The ruleset body; `checks` defaults to the matching globs' checks."""
         rules: list[dict[str, Any]] = [
             {"type": "deletion"},
             {"type": "non_fast_forward"},
@@ -579,7 +624,7 @@ class RepoRuleset(Rule):
                 },
             },
         ]
-        checks = self.checks_for(full_name)
+        checks = self.checks_for(full_name) if checks is None else checks
         if checks:
             rules.append(
                 {
@@ -601,6 +646,16 @@ class RepoRuleset(Rule):
         }
 
     def apply(self, workspace: Workspace) -> list[Finding]:
+        problem = self.workflow_check_problem(workspace)
+        valid = self.required_workflow_check is not None and problem is None
+        checks = self._checks(workspace.full_name, valid)
+        findings = self._sync(workspace, checks)
+        if problem:
+            message = f"required check {self.required_workflow_check} is not added: {problem}"
+            findings.append(Finding(self.id, message, fixable=False))
+        return findings
+
+    def _sync(self, workspace: Workspace, checks: list[str]) -> list[Finding]:
         listed = workspace.rulesets()
         if listed is None:
             return [Finding(self.id, RULESETS_UNAVAILABLE, fixable=False)]
@@ -613,7 +668,7 @@ class RepoRuleset(Rule):
             message = f"multiple rulesets named {self.ruleset_name}"
             return [Finding(self.id, message, fixable=False)]
 
-        wanted = self.payload(workspace.full_name)
+        wanted = self.payload(workspace.full_name, checks)
         if not managed:
             workspace.change_ruleset(self.ruleset_name, None, wanted)
             return [Finding(self.id, f"ruleset {self.ruleset_name} is missing", setting=True)]
@@ -702,6 +757,9 @@ SELF_HOSTED = "self-hosted"
 UBUNTU_PATTERN = "ubuntu-*"
 YAML_STR = "tag:yaml.org,2002:str"
 UNSAFE_REWRITE = "cannot rewrite safely"
+PULL_REQUEST = "pull_request"
+# The activity types a pull_request trigger runs on by default; a required check needs all.
+PULL_REQUEST_TYPES = frozenset({"opened", "synchronize", "reopened"})
 
 
 @dataclass(frozen=True)
@@ -767,12 +825,11 @@ class SelfHostedRunners(Rule):
         if listed is None:
             message = f"{WORKFLOWS_DIR}: the workflow files cannot be listed"
             return [Finding(self.id, message, fixable=False)]
-        files = [
-            path
-            for path in listed
-            if path.endswith((".yml", ".yaml")) and "/" not in path[len(WORKFLOWS_DIR) :]
+        return [
+            finding
+            for path in _workflow_files(listed)
+            for finding in self._check_file(workspace, path)
         ]
-        return [finding for path in files for finding in self._check_file(workspace, path)]
 
     def _check_file(self, workspace: Workspace, path: str) -> list[Finding]:
         text = workspace.read(path)
@@ -906,6 +963,173 @@ class SelfHostedRunners(Rule):
 
     def _allowed_sets(self) -> set[frozenset[str]]:
         return {frozenset(label.casefold() for label in labels) for labels in self.allowed_runs_on}
+
+
+def _workflow_files(listed: list[str]) -> list[str]:
+    """The direct `.yml`/`.yaml` children of the workflows directory."""
+    return [
+        path
+        for path in listed
+        if path.endswith((".yml", ".yaml")) and "/" not in path[len(WORKFLOWS_DIR) :]
+    ]
+
+
+class _Problem(NamedTuple):
+    """Why a workflow file does not run a check; a higher `stage` is closer to a valid file."""
+
+    stage: int
+    message: str
+
+
+# Stages of `_file_problem`, in the order it checks them.
+(
+    _UNREADABLE,
+    _NO_JOB,
+    _JOB_UNUSABLE,
+    _NO_TRIGGER,
+    _TYPES_FILTER,
+    _BRANCH_FILTER,
+    _PATH_FILTER,
+) = range(7)
+
+
+def _workflow_check_problem(workspace: Workspace, check: str, branch: str) -> str | None:
+    """Why no workflow runs the `check` on pull requests to `branch`; None when one certainly does.
+
+    A file qualifies when it triggers on `pull_request` without a filter that can skip the
+    default branch or leave the check pending, and has a plain job whose check name is exactly
+    `check`. Only the default branch commit counts, not files written by earlier rules (they
+    exist only in the unmerged pull request). The text names the problem of the file that came
+    closest.
+    """
+    listed = workspace.original_paths(WORKFLOWS_DIR)
+    if listed is None:
+        return f"{WORKFLOWS_DIR}: the workflow files cannot be listed"
+    problems = []
+    for path in _workflow_files(listed):
+        text = workspace.original(path)
+        problem = (
+            _Problem(_UNREADABLE, "the file is not readable")
+            if text is None
+            else _file_problem(text, check, branch)
+        )
+        if problem is None:
+            return None
+        problems.append(_Problem(problem.stage, f"{path}: {problem.message}"))
+    if not problems:
+        return f"{WORKFLOWS_DIR}: no workflow file (.yml or .yaml)"
+    return max(problems, key=lambda problem: problem.stage).message
+
+
+def _file_problem(text: str, check: str, branch: str) -> _Problem | None:
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        return _Problem(_UNREADABLE, f"invalid YAML ({getattr(exc, 'problem', None) or 'invalid'})")
+    top = _mapping(root)
+    jobs = _mapping(top.get("jobs")) if top is not None else None
+    if top is None or jobs is None:
+        return _Problem(_UNREADABLE, "no 'jobs' mapping")
+    job_problem = _check_job_problem(jobs, check)
+    if job_problem is not None:
+        return job_problem
+    # PyYAML (YAML 1.1) loads the key `on` as True, but the node holds the text.
+    _, trigger = _entry(root, "on")
+    found, filters = _pull_request_trigger(trigger)
+    if not found:
+        return _Problem(_NO_TRIGGER, "no pull_request trigger")
+    return _filter_problem(filters, branch)
+
+
+def _check_job_problem(jobs: dict[str, yaml.Node], check: str) -> _Problem | None:
+    """None when a job reports exactly `check`: its `name`, or its id without a `name`."""
+    problem = _Problem(
+        _NO_JOB, f"no job reports the check {check!r} (its name, or its id without a name)"
+    )
+    for job_id, job in jobs.items():
+        fields = _mapping(job)
+        if fields is None:
+            continue
+        name = _text(fields["name"]) if "name" in fields else job_id
+        if name is not None and "${{" in name:
+            problem = _Problem(_JOB_UNUSABLE, f"job {job_id}: the name contains an expression")
+        elif name != check:
+            continue
+        elif "uses" in fields:
+            problem = _Problem(
+                _JOB_UNUSABLE,
+                f"job {job_id} calls a reusable workflow (its check is '{check} / <job>')",
+            )
+        elif "strategy" in fields and "matrix" in (_mapping(fields["strategy"]) or {"matrix": 0}):
+            problem = _Problem(
+                _JOB_UNUSABLE, f"job {job_id} has a matrix (its check is '{check} (<value>)')"
+            )
+        else:
+            return None
+    return problem
+
+
+def _pull_request_trigger(trigger: yaml.Node | None) -> tuple[bool, yaml.Node | None]:
+    """Whether `on` includes `pull_request`, and that trigger's configuration node."""
+    if isinstance(trigger, yaml.SequenceNode):
+        return any(_text(item) == PULL_REQUEST for item in trigger.value), None
+    if isinstance(trigger, yaml.MappingNode):
+        key, config = _entry(trigger, PULL_REQUEST)
+        return key is not None, config
+    return _text(trigger) == PULL_REQUEST, None
+
+
+def _filter_problem(filters: yaml.Node | None, branch: str) -> _Problem | None:
+    fields = _mapping(filters) or {}
+    if "types" in fields:
+        types = _patterns(fields["types"])
+        if types is None:
+            return _Problem(_TYPES_FILTER, "pull_request types cannot be read")
+        if not PULL_REQUEST_TYPES.issubset(types):
+            return _Problem(
+                _TYPES_FILTER,
+                f"pull_request types {sorted(types)} do not cover "
+                f"{', '.join(sorted(PULL_REQUEST_TYPES))}",
+            )
+    for key, ignore in (("branches", False), ("branches-ignore", True)):
+        if key not in fields:
+            continue
+        patterns = _patterns(fields[key])
+        if patterns is None:
+            return _Problem(_BRANCH_FILTER, f"pull_request {key} cannot be read")
+        if _branch_listed(branch, patterns) is ignore:
+            return _Problem(
+                _BRANCH_FILTER, f"pull_request {key} does not run on the default branch {branch}"
+            )
+    for key in ("paths", "paths-ignore"):
+        if key in fields:
+            return _Problem(
+                _PATH_FILTER,
+                f"pull_request has {key}: the check stays pending on a pull request "
+                "that touches no matching file",
+            )
+    return None
+
+
+def _branch_listed(branch: str, patterns: list[str]) -> bool:
+    """True when `branch` matches the filter; a later `!pattern` removes an earlier match."""
+    listed = False
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        if fnmatchcase(branch, pattern.removeprefix("!")):
+            listed = not negated
+    return listed
+
+
+def _patterns(node: yaml.Node) -> list[str] | None:
+    """The filter patterns of a string or a list of strings; None for anything else."""
+    if _text(node) is not None:
+        return [_text(node) or ""]
+    if isinstance(node, yaml.SequenceNode):
+        texts = [_text(item) for item in node.value]
+        if all(text is not None for text in texts):
+            return [text for text in texts if text is not None]
+    return None
 
 
 def _mapping(node: yaml.Node | None) -> dict[str, yaml.Node] | None:
