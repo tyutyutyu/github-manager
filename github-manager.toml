@@ -94,7 +94,8 @@ id = "repo-settings"
 type = "repo_settings"
 # Repository settings: applied directly through the GitHub API (PyGithub), not by pull
 # request. Needs a token with Administration: read/write.
-settings = { delete_branch_on_merge = true, allow_auto_merge = true, allow_update_branch = true, has_wiki = false }
+# Squash is the only allowed merge method (also in the default-branch-ruleset).
+settings = { delete_branch_on_merge = true, allow_auto_merge = true, allow_update_branch = true, has_wiki = false, allow_squash_merge = true, allow_merge_commit = false, allow_rebase_merge = false }
 # Secret scanning and push protection: enforced on public repositories only (paid on
 # private ones, which are skipped).
 security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }
@@ -104,7 +105,7 @@ exclude = []
 id = "default-branch-ruleset"
 type = "repo_ruleset"
 # Ruleset "github-manager: default-branch-ruleset" on the default branch: no deletion, no
-# force push, pull request required, no bypass actors. Applied directly, not by pull
+# force push, pull request required (squash merge only), no bypass actors. Applied directly, not by pull
 # request. Other rulesets are left alone. Needs a token with Administration: read/write.
 # Required checks per repository (glob on the name or OWNER/NAME); only names that report
 # on the default branch, otherwise no pull request can be merged there.

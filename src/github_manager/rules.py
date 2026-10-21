@@ -515,7 +515,8 @@ class RepoRuleset(Rule):
     """The default branch must be protected by a ruleset owned by github-manager.
 
     The ruleset is named `github-manager: <rule id>`; it forbids deleting and force
-    pushing the default branch and requires a pull request, without bypass actors.
+    pushing the default branch and requires a pull request that can only be squash
+    merged, without bypass actors.
     `required_status_checks` maps repository globs (name or OWNER/NAME) to check names;
     a repository gets the union of the checks of every matching glob. Other rulesets are
     never touched. Fixes are applied to the repository directly, not by pull request.
@@ -574,7 +575,7 @@ class RepoRuleset(Rule):
                     "require_code_owner_review": False,
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": True,
-                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "allowed_merge_methods": ["squash"],
                 },
             },
         ]

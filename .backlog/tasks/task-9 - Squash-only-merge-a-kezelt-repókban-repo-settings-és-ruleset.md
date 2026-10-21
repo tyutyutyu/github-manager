@@ -1,10 +1,10 @@
 ---
 id: TASK-9
 title: Squash-only merge a kezelt repókban (repo-settings és ruleset)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21T18:12:00Z'
-updated_date: '2026-10-21T20:17:00Z'
+updated_date: '2026-10-21T21:10:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -59,14 +59,28 @@ A github-manager minden kezelt repóban squash-only merge-et állít be: repó-b
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A github-manager.toml repo-settings settings táblája tartalmazza: allow_squash_merge = true, allow_merge_commit = false, allow_rebase_merge = false
-- [ ] #2 RepoRuleset.payload pull_request szabályában allowed_merge_methods pontosan ["squash"]
-- [ ] #3 Régi merge-módszerlistával létező menedzselt ruleset outdated findingot ad és fix módban frissül
-- [ ] #4 README repo_ruleset sora és a github-manager-rules skill payload-leírása a squash-only merge-et írja
+- [x] #1 A github-manager.toml repo-settings settings táblája tartalmazza: allow_squash_merge = true, allow_merge_commit = false, allow_rebase_merge = false
+- [x] #2 RepoRuleset.payload pull_request szabályában allowed_merge_methods pontosan ["squash"]
+- [x] #3 Régi merge-módszerlistával létező menedzselt ruleset outdated findingot ad és fix módban frissül
+- [x] #4 README repo_ruleset sora és a github-manager-rules skill payload-leírása a squash-only merge-et írja
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-9-squash-only-merge-a-kezelt-repokban-repo-setting.
+
+Verified: task verify exit 0 (324 tests, 99.25% coverage). Live toml not asserted in tests (TASK-12). Skill file .claude/skills/github-manager-rules/SKILL.md is gitignored and updated locally (not in diff).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Squash is now the only merge method: repo-settings sets allow_squash_merge=true, allow_merge_commit=false, allow_rebase_merge=false; RepoRuleset.payload uses allowed_merge_methods ["squash"]. Added tests for the payload and for an outdated ruleset with the old methods. README and toml comments updated; the gitignored skill file was updated locally. Verification: ruff format and task verify passed. Risk: existing managed rulesets update as outdated on the next fix run (expected).
+<!-- SECTION:FINAL_SUMMARY:END -->
