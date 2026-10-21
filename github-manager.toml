@@ -108,7 +108,7 @@ type = "repo_ruleset"
 # request. Other rulesets are left alone. Needs a token with Administration: read/write.
 # Required checks per repository (glob on the name or OWNER/NAME); only names that report
 # on the default branch, otherwise no pull request can be merged there.
-required_status_checks = { "tyutyutyu/github-manager" = ["verify"], "tyutyutyu-org/ph_toolbox" = ["verify"], "tyutyutyu-org/youtube-mirror" = ["test"] }
+required_status_checks = { "tyutyutyu/github-manager" = ["verify"], "tyutyutyu-org/ph_toolbox" = ["verify"], "tyutyutyu-org/project-manager" = ["verify"], "tyutyutyu-org/youtube-mirror" = ["test"] }
 strict_required_status_checks = false
 exclude = []
 

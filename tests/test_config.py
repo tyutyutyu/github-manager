@@ -66,6 +66,7 @@ def test_repository_config_file_is_valid() -> None:
     assert ruleset.required_status_checks == {
         "tyutyutyu/github-manager": ["verify"],
         "tyutyutyu-org/ph_toolbox": ["verify"],
+        "tyutyutyu-org/project-manager": ["verify"],
         "tyutyutyu-org/youtube-mirror": ["test"],
     }
     assert not ruleset.strict_required_status_checks
