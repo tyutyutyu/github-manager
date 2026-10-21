@@ -41,6 +41,11 @@ exclude = [
 ]
 include_forks = false
 
+# Squash auto-merge of the pull request (only the squash merge method is allowed by the
+# rules). It is turned on only in repositories where the repo_ruleset rule requires the
+# `verify` check, after the settings and the ruleset are applied; elsewhere it is skipped.
+auto_merge = true
+
 # One pull request per repository, from this branch. It is regenerated on every run.
 branch = "feature/github-manager-compliance"
 pr_title = "chore: align repository with central rules"

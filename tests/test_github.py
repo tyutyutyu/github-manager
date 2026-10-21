@@ -194,10 +194,10 @@ def test_graphql_errors_raise(http: FakeHttp, client: GitHub) -> None:
 
 
 def test_pull_requests(http: FakeHttp, client: GitHub) -> None:
-    pull = {"number": 7, "html_url": "https://github.com/me/a/pull/7"}
+    pull = {"number": 7, "html_url": "https://github.com/me/a/pull/7", "node_id": "PR_7"}
     http.queue([pull]).queue([]).queue(pull).queue({}).queue({}).queue({})
 
-    assert client.find_open_pr("me/a", "fix") == github.PullRequest(7, pull["html_url"])
+    assert client.find_open_pr("me/a", "fix") == github.PullRequest(7, pull["html_url"], "PR_7")
     assert http.requests[0][1] == f"{API}/repos/me/a/pulls?state=open&head=me%3Afix"
     assert client.find_open_pr("me/a", "fix") is None
     assert client.create_pr("me/a", "main", "fix", "t", "b").number == 7
@@ -208,6 +208,44 @@ def test_pull_requests(http: FakeHttp, client: GitHub) -> None:
         ("POST", f"{API}/repos/me/a/issues/7/comments"),
         ("PATCH", f"{API}/repos/me/a/pulls/7"),
     ]
+
+
+def test_pull_request_reports_auto_merge_state(http: FakeHttp, client: GitHub) -> None:
+    pull = {
+        "number": 7,
+        "html_url": "u",
+        "node_id": "PR_7",
+        "auto_merge": {"merge_method": "squash"},
+    }
+    http.queue([pull]).queue([{**pull, "auto_merge": None}])
+
+    assert client.find_open_pr("me/a", "fix") == github.PullRequest(7, "u", "PR_7", auto_merge=True)
+    assert client.find_open_pr("me/a", "fix") == github.PullRequest(7, "u", "PR_7")
+
+
+def test_enable_auto_merge_sends_squash_mutation(http: FakeHttp, client: GitHub) -> None:
+    http.queue({"data": {"enablePullRequestAutoMerge": {"pullRequest": {"number": 7}}}})
+    client.enable_auto_merge("me/a", github.PullRequest(7, "u", "PR_7"))
+
+    method, url, body = http.requests[0]
+    assert (method, url) == ("POST", f"{API}/graphql")
+    assert isinstance(body, dict)
+    assert "enablePullRequestAutoMerge" in body["query"]
+    assert "mergeMethod: SQUASH" in body["query"]
+    assert body["variables"] == {"pullRequestId": "PR_7"}
+
+
+def test_enable_auto_merge_raises_graphql_errors(http: FakeHttp, client: GitHub) -> None:
+    http.queue({"errors": [{"message": "Pull request is in clean status"}]})
+    with pytest.raises(GitHubError, match="clean status"):
+        client.enable_auto_merge("me/a", github.PullRequest(7, "u", "PR_7"))
+
+
+def test_merge_pr_squash_merges_through_rest(http: FakeHttp, client: GitHub) -> None:
+    http.queue({"merged": True})
+    client.merge_pr("me/a", 7)
+
+    assert http.requests == [("PUT", f"{API}/repos/me/a/pulls/7/merge", {"merge_method": "squash"})]
 
 
 def test_resolve_token_prefers_environment(monkeypatch: pytest.MonkeyPatch) -> None:

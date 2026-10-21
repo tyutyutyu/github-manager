@@ -3,10 +3,10 @@ id: TASK-10
 title: >-
   Compliance PR-ok squash auto-merge-e, csak kötelező verify checkkel védett
   repókban
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21T18:13:00Z'
-updated_date: '2026-10-21T20:17:00Z'
+updated_date: '2026-10-21T23:24:00Z'
 labels: []
 dependencies:
   - TASK-9
@@ -82,18 +82,32 @@ Megjegyzés: a `feature/TASK-9-10-squash-auto-merge` ágon van egy commit nélk�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 auto_merge felső szintű bool config kulcs (alapértelmezés false), a github-manager.toml-ban true
-- [ ] #2 Fix módban a compliance PR-on squash auto-merge kapcsol be, kizárólag ha a menedzselt ruleset a verify checket kötelezővé teszi, a repo settings és ruleset írások után
-- [ ] #3 Verify nélküli repóban (akkor is, ha más kötelező check van) nincs auto-merge és nincs merge hívás, a riport jelzi az okot
-- [ ] #4 Clean status hibára (a verify már teljesült) a PR közvetlenül squash-mergelődik
-- [ ] #5 Újraírt PR-ágon az auto-merge újra bekapcsol; már bekapcsolt, változatlan PR-nál nincs újabb hívás
-- [ ] #6 Auto-merge vagy merge hiba nem ad ERROR outcome-ot, nem akadályozza a settings/ruleset alkalmazását, és a hibaszöveg megjelenik a kimenetben és a job summary-ben
-- [ ] #7 GitHub.enable_auto_merge és merge_pr a várt GraphQL/REST kérést küldi
-- [ ] #8 README és a github-manager-rules skill leírja az auto-merge feltételeit és sorrendjét
+- [x] #1 auto_merge felső szintű bool config kulcs (alapértelmezés false), a github-manager.toml-ban true
+- [x] #2 Fix módban a compliance PR-on squash auto-merge kapcsol be, kizárólag ha a menedzselt ruleset a verify checket kötelezővé teszi, a repo settings és ruleset írások után
+- [x] #3 Verify nélküli repóban (akkor is, ha más kötelező check van) nincs auto-merge és nincs merge hívás, a riport jelzi az okot
+- [x] #4 Clean status hibára (a verify már teljesült) a PR közvetlenül squash-mergelődik
+- [x] #5 Újraírt PR-ágon az auto-merge újra bekapcsol; már bekapcsolt, változatlan PR-nál nincs újabb hívás
+- [x] #6 Auto-merge vagy merge hiba nem ad ERROR outcome-ot, nem akadályozza a settings/ruleset alkalmazását, és a hibaszöveg megjelenik a kimenetben és a job summary-ben
+- [x] #7 GitHub.enable_auto_merge és merge_pr a várt GraphQL/REST kérést küldi
+- [x] #8 README és a github-manager-rules skill leírja az auto-merge feltételeit és sorrendjét
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-10-compliance-pr-ok-squash-auto-merge-e-csak-kotele.
+
+Finalization validation (this session): 'uv run ruff format -q .' exit 0; 'task verify' exit 0 (412 passed, total coverage 99%); tracked/untracked status identical before and after the formatter; git diff --check exit 0. Eligibility requires required_workflow_check == 'verify' (engine.VERIFY_CHECK). .claude/skills/github-manager-rules/SKILL.md is git-ignored (git check-ignore -v printed .gitignore:265 .claude/) and documents the auto-merge section locally. Corrected file list: also tests/test_cli.py, tests/test_config.py, tests/test_github.py and the TASK-10 backlog file.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added top-level auto_merge config (default false, true in github-manager.toml). GitHub gets PullRequest.node_id/auto_merge, enable_auto_merge (GraphQL enablePullRequestAutoMerge, SQUASH) and merge_pr (PUT merge, squash). The engine enables auto-merge after the settings and ruleset writes, only when a applicable RepoRuleset requires the 'verify' check with no manual finding; 'clean status' falls back to a direct squash merge; PR_UPDATED re-enables, an untouched PR with it on gets no call; any other error is reported as 'failed: ...' without ERROR. CLI prints the auto-merge line and an Auto-merge job-summary column (escaped). README and the local skill document it. Verified: ruff format exit 0 and task verify exit 0 (412 tests, 99% coverage). Not run: 'uv run github-manager repos' (live read-only command) and any real fix run. The skill file is git-ignored so it is not part of the diff.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from github_manager.config import Config
 from github_manager.github import GitHubError, PullRequest, Repo
-from github_manager.rules import Finding, ruleset_matches
+from github_manager.rules import Finding, RepoRuleset, ruleset_matches
 
 
 class GitHubApi(Protocol):
@@ -28,6 +28,8 @@ class GitHubApi(Protocol):
     def find_open_pr(self, repo: str, branch: str) -> PullRequest | None: ...
     def create_pr(self, repo: str, base: str, head: str, title: str, body: str) -> PullRequest: ...
     def update_pr(self, repo: str, number: int, title: str, body: str) -> None: ...
+    def enable_auto_merge(self, repo: str, pull: PullRequest) -> None: ...
+    def merge_pr(self, repo: str, number: int) -> None: ...
     def close_pr(self, repo: str, number: int, comment: str) -> None: ...
     def repo_settings(self, repo: str) -> dict[str, Any]: ...
     def update_repo_settings(self, repo: str, settings: dict[str, Any]) -> None: ...
@@ -37,6 +39,13 @@ class GitHubApi(Protocol):
     def update_ruleset(
         self, repo: str, ruleset_id: int, payload: dict[str, Any]
     ) -> dict[str, Any]: ...
+
+
+# GitHub refuses to enable auto-merge on a pull request that can be merged right away.
+CLEAN_STATUS = "clean status"
+VERIFY_NOT_REQUIRED = "not enabled: verify is not required"
+# Only this required workflow check makes a repository eligible for auto-merge.
+VERIFY_CHECK = "verify"
 
 
 class Outcome(StrEnum):
@@ -65,6 +74,7 @@ class RepoReport:
     findings: list[Finding] = field(default_factory=list)
     diffs: list[str] = field(default_factory=list)
     detail: str = ""
+    auto_merge: str = ""  # what happened to auto-merge; empty when it was not considered
 
     @property
     def manual_findings(self) -> list[Finding]:
@@ -258,7 +268,7 @@ def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoRe
         diffs=[workspace.diff(path) for path in changes],
     )
     if fix:
-        report.outcome, report.detail = _sync_pull_request(
+        report.outcome, report.detail, pull = _sync_pull_request(
             api, config, repo, base_sha, report, changes
         )
         settings = workspace.setting_changes()
@@ -269,7 +279,55 @@ def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoRe
             _apply_ruleset(api, repo.full_name, change)
         if (settings or rulesets) and report.outcome is Outcome.NEEDS_FIX:
             report.outcome = Outcome.SETTINGS_UPDATED
+        if config.auto_merge and pull is not None:
+            report.auto_merge = _auto_merge(api, config, repo, workspace, report, pull)
     return report
+
+
+def _auto_merge(
+    api: GitHubApi,
+    config: Config,
+    repo: Repo,
+    workspace: RemoteWorkspace,
+    report: RepoReport,
+    pull: PullRequest,
+) -> str:
+    """Squash auto-merge of the pull request, only where the managed ruleset requires `verify`.
+
+    Runs after the settings and the ruleset are applied; a failure is returned as text and
+    never stops the repository.
+    """
+    name = repo.full_name
+    try:
+        if not _verify_required(config, repo, workspace, report.findings):
+            return VERIFY_NOT_REQUIRED
+        # Only a pull request left untouched keeps its state; a rewritten branch may have lost it.
+        if pull.auto_merge and report.outcome is Outcome.PR_UP_TO_DATE:
+            return "already enabled"
+        try:
+            api.enable_auto_merge(name, pull)
+        except GitHubError as exc:
+            if CLEAN_STATUS not in str(exc).lower():
+                raise
+            # The required check has already passed, so merging right away is safe.
+            api.merge_pr(name, pull.number)
+            return "merged (squash)"
+        return "enabled (squash)"
+    except GitHubError as exc:
+        return f"failed: {exc}"
+
+
+def _verify_required(
+    config: Config, repo: Repo, workspace: RemoteWorkspace, findings: list[Finding]
+) -> bool:
+    """True when a ruleset rule requires the `verify` check here and was fully applicable."""
+    return any(
+        rule.required_workflow_check == VERIFY_CHECK
+        and rule.requires_workflow_check(workspace)
+        and not any(finding.rule_id == rule.id and not finding.fixable for finding in findings)
+        for rule in config.rules
+        if isinstance(rule, RepoRuleset) and rule.applies_to(repo.name, repo.full_name)
+    )
 
 
 def _apply_ruleset(api: GitHubApi, repo: str, change: RulesetChange) -> None:
@@ -290,18 +348,19 @@ def _sync_pull_request(
     base_sha: str,
     report: RepoReport,
     changes: dict[str, str],
-) -> tuple[Outcome, str]:
+) -> tuple[Outcome, str, PullRequest | None]:
+    """Create, refresh or close the pull request; returns the open one, if any."""
     name, branch = repo.full_name, config.branch
     pull = api.find_open_pr(name, branch)
     branch_sha = api.branch_sha(name, branch)
 
     if not changes:
         if pull is None:
-            return report.outcome, ""
+            return report.outcome, "", None
         api.close_pr(name, pull.number, "The default branch already satisfies the rules.")
         if branch_sha is not None:
             api.delete_branch(name, branch)
-        return Outcome.PR_CLOSED, pull.url
+        return Outcome.PR_CLOSED, pull.url, None
 
     body = _pr_body(report)
     if (
@@ -310,7 +369,7 @@ def _sync_pull_request(
         and _branch_matches(api, name, base_sha, branch_sha, changes)
     ):
         api.update_pr(name, pull.number, config.pr_title, body)
-        return Outcome.PR_UP_TO_DATE, pull.url
+        return Outcome.PR_UP_TO_DATE, pull.url, pull
 
     api.reset_branch(name, branch, base_sha, exists=branch_sha is not None)
     file_findings = [finding for finding in report.findings if not finding.setting]
@@ -318,9 +377,9 @@ def _sync_pull_request(
     api.commit_files(name, branch, base_sha, message, changes)
     if pull is not None:
         api.update_pr(name, pull.number, config.pr_title, body)
-        return Outcome.PR_UPDATED, pull.url
+        return Outcome.PR_UPDATED, pull.url, pull
     pull = api.create_pr(name, repo.default_branch, branch, config.pr_title, body)
-    return Outcome.PR_CREATED, pull.url
+    return Outcome.PR_CREATED, pull.url, pull
 
 
 def _branch_matches(

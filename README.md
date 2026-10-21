@@ -97,6 +97,28 @@ filter, branch filter, unlistable file tree, invalid YAML) and the rest of the r
 still applied.
 A job skipped by `if:` is not detected; GitHub counts a skipped job as passing.
 
+## Auto-merge
+
+With `auto_merge = true` (top-level key, default `false`), `fix` turns on **squash
+auto-merge** on the compliance pull request, only when all of these hold:
+
+- the pull request was created, updated or found up to date in this run;
+- a `repo_ruleset` rule applies to the repository and requires the `verify` check
+  (`required_workflow_check = "verify"` and the workflow condition above is met, so the
+  ruleset the run applied really contains it); another required check, such as one set by a
+  glob in `required_status_checks`, is not enough;
+- that rule has no *manual* finding in the run (e.g. two managed rulesets with one name).
+
+It runs after the repository settings and the ruleset are applied (a new repository has
+`allow_auto_merge` off until then). The pull request branch is rebuilt on a change, so
+auto-merge is turned on again whenever the pull request was updated; an untouched pull
+request that already has it gets no new call. If the `verify` check has already passed, GitHub
+refuses auto-merge ("clean status") and the pull request is squash-merged right away. Any other
+auto-merge or merge error does not fail the repository: it is shown under the repository's line
+(`auto-merge  failed: ...`) and in the *Auto-merge* column of the job summary, and the rest of the
+fixes are kept. A repository that does not qualify shows `auto-merge  not enabled: verify is
+not required`. `check` never enables it.
+
 ## Scheduled run
 
 [.github/workflows/enforce.yml](.github/workflows/enforce.yml) runs `fix` daily and can

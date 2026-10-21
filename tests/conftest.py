@@ -49,6 +49,11 @@ class FakeGitHub:
         ] = {}  # repo -> number -> (head, body, open)
         self.calls: list[str] = []
         self._counter = 0
+        # (repo, number) of the pull requests with auto-merge on
+        self.auto_merge_on: set[tuple[str, int]] = set()
+        # Error messages to raise from enable_auto_merge / merge_pr.
+        self.auto_merge_error: str | None = None
+        self.merge_error: str | None = None
 
     def add_repo(
         self,
@@ -154,19 +159,40 @@ class FakeGitHub:
     def find_open_pr(self, repo: str, branch: str) -> PullRequest | None:
         for number, (head, _, is_open) in self.pulls[repo].items():
             if head == branch and is_open:
-                return PullRequest(number, f"https://example/{repo}/pull/{number}")
+                return self._pull_request(repo, number)
         return None
+
+    def _pull_request(self, repo: str, number: int) -> PullRequest:
+        return PullRequest(
+            number,
+            f"https://example/{repo}/pull/{number}",
+            f"PR_{number}",
+            (repo, number) in self.auto_merge_on,
+        )
 
     def create_pr(self, repo: str, base: str, head: str, title: str, body: str) -> PullRequest:
         number = len(self.pulls[repo]) + 1
         self.pulls[repo][number] = (head, body, True)
         self.calls.append("create pr")
-        return PullRequest(number, f"https://example/{repo}/pull/{number}")
+        return self._pull_request(repo, number)
 
     def update_pr(self, repo: str, number: int, title: str, body: str) -> None:
         head, _, is_open = self.pulls[repo][number]
         self.pulls[repo][number] = (head, body, is_open)
         self.calls.append("update pr")
+
+    def enable_auto_merge(self, repo: str, pull: PullRequest) -> None:
+        self.calls.append(f"enable auto-merge {pull.number}")
+        if self.auto_merge_error:
+            raise GitHubError(self.auto_merge_error)
+        self.auto_merge_on.add((repo, pull.number))
+
+    def merge_pr(self, repo: str, number: int) -> None:
+        self.calls.append(f"merge pr {number}")
+        if self.merge_error:
+            raise GitHubError(self.merge_error)
+        head, body, _ = self.pulls[repo][number]
+        self.pulls[repo][number] = (head, body, False)
 
     def close_pr(self, repo: str, number: int, comment: str) -> None:
         head, body, _ = self.pulls[repo][number]

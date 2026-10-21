@@ -1,9 +1,16 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from github_manager.config import Config
-from github_manager.engine import Outcome, RemoteWorkspace, process_repo, select_repos
+from github_manager.engine import (
+    VERIFY_NOT_REQUIRED,
+    Outcome,
+    RemoteWorkspace,
+    process_repo,
+    select_repos,
+)
 from github_manager.github import GitHubError
 from github_manager.rules import (
     BranchStrategy,
@@ -703,3 +710,207 @@ def test_remote_workspace_paths_are_none_when_tree_is_not_listable(fake_github) 
     workspace = RemoteWorkspace(fake_github, name, "base", "main")
     workspace.write("b", "z")
     assert workspace.paths("") is None
+
+
+AUTO_MERGE_CONFIG = Config(
+    owners=["owner"], rules=[RULE, SETTINGS_RULE, VERIFY_RULE], auto_merge=True
+)
+CLEAN_STATUS_ERROR = "GraphQL: Pull request is in clean status"
+
+
+def add_auto_merge_repo(fake_github, files=None, **kwargs) -> str:
+    """A repository that needs a pull request, a setting and a ruleset with `verify`."""
+    return fake_github.add_repo(
+        "app",
+        {VERIFY_PATH: VERIFY_WORKFLOW} if files is None else files,
+        settings={"delete_branch_on_merge": False},
+        **kwargs,
+    )
+
+
+def run_fix(fake_github, config=AUTO_MERGE_CONFIG):
+    return process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+
+
+def auto_merge_calls(fake_github) -> list[str]:
+    return [call for call in fake_github.calls if "auto-merge" in call or call.startswith("merge")]
+
+
+def test_auto_merge_is_enabled_after_settings_and_ruleset(fake_github) -> None:
+    name = add_auto_merge_repo(fake_github)
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == "enabled (squash)"
+    assert (name, 1) in fake_github.auto_merge_on
+    calls = fake_github.calls
+    enabled = calls.index("enable auto-merge 1")
+    assert calls.index("settings ['delete_branch_on_merge']") < enabled
+    assert calls.index(f"create ruleset {RULESET_NAME}") < enabled
+    assert calls.index("create pr") < enabled
+
+
+def test_auto_merge_is_off_without_the_config_flag(fake_github) -> None:
+    add_auto_merge_repo(fake_github)
+
+    report = run_fix(fake_github, replace(AUTO_MERGE_CONFIG, auto_merge=False))
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == ""
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_check_never_enables_auto_merge(fake_github) -> None:
+    add_auto_merge_repo(fake_github)
+
+    report = process_repo(fake_github, AUTO_MERGE_CONFIG, repo_named(fake_github, "app"), fix=False)
+
+    assert report.auto_merge == ""
+    assert not [call for call in fake_github.calls if not call.startswith("read")]
+
+
+def test_other_required_checks_do_not_enable_auto_merge(fake_github) -> None:
+    other = RepoRuleset.from_options(
+        {"id": "dr", "required_status_checks": {"owner/app": ["test"]}}, Path()
+    )
+    add_auto_merge_repo(fake_github, {})
+
+    report = run_fix(fake_github, replace(AUTO_MERGE_CONFIG, rules=[RULE, other]))
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == VERIFY_NOT_REQUIRED
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_other_required_workflow_check_does_not_enable_auto_merge(fake_github) -> None:
+    other = RepoRuleset.from_options({"id": "dr", "required_workflow_check": "test"}, Path())
+    name = add_auto_merge_repo(
+        fake_github, {".github/workflows/test.yml": VERIFY_WORKFLOW.replace("verify:", "test:")}
+    )
+
+    report = run_fix(fake_github, replace(AUTO_MERGE_CONFIG, rules=[RULE, SETTINGS_RULE, other]))
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert len(fake_github.repos[name].rulesets) == 1
+    assert report.auto_merge == VERIFY_NOT_REQUIRED
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_verify_workflow_that_does_not_run_on_pull_requests_is_not_enough(fake_github) -> None:
+    add_auto_merge_repo(fake_github, {VERIFY_PATH: VERIFY_WORKFLOW.replace("pull_request", "push")})
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == VERIFY_NOT_REQUIRED
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_repository_without_rulesets_gets_no_auto_merge(fake_github) -> None:
+    add_auto_merge_repo(fake_github, rulesets_available=False)
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == VERIFY_NOT_REQUIRED
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_ruleset_rule_with_a_manual_finding_gets_no_auto_merge(fake_github) -> None:
+    name = add_auto_merge_repo(fake_github)
+    payload = VERIFY_RULE.payload(name, ["verify"])
+    fake_github.add_ruleset(name, payload)
+    fake_github.add_ruleset(name, payload)
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == VERIFY_NOT_REQUIRED
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_no_pull_request_means_no_auto_merge(fake_github) -> None:
+    files = {
+        ".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n",
+        VERIFY_PATH: VERIFY_WORKFLOW,
+    }
+    add_auto_merge_repo(fake_github, files)
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.SETTINGS_UPDATED
+    assert report.auto_merge == ""
+    assert auto_merge_calls(fake_github) == []
+
+
+def test_auto_merge_is_enabled_again_only_when_the_branch_was_rewritten(fake_github) -> None:
+    name = add_auto_merge_repo(fake_github)
+    run_fix(fake_github)
+
+    fake_github.calls.clear()
+    unchanged = run_fix(fake_github)
+    assert unchanged.outcome is Outcome.PR_UP_TO_DATE
+    assert unchanged.auto_merge == "already enabled"
+    assert auto_merge_calls(fake_github) == []
+
+    # The default branch moves on: the branch is rebuilt although the stored state says "on".
+    repo = fake_github.repos[name]
+    repo.commits["base2"] = ("base", {**repo.commits["base"][1], "README.md": "x"})
+    repo.branches["main"] = "base2"
+    rewritten = run_fix(fake_github)
+    assert rewritten.outcome is Outcome.PR_UPDATED
+    assert rewritten.auto_merge == "enabled (squash)"
+    assert auto_merge_calls(fake_github) == ["enable auto-merge 1"]
+
+
+def test_up_to_date_pull_request_without_auto_merge_gets_it(fake_github) -> None:
+    add_auto_merge_repo(fake_github)
+    fake_github.auto_merge_error = "boom"
+    run_fix(fake_github)
+
+    fake_github.auto_merge_error = None
+    again = run_fix(fake_github)
+
+    assert again.outcome is Outcome.PR_UP_TO_DATE
+    assert again.auto_merge == "enabled (squash)"
+
+
+def test_clean_status_merges_the_pull_request_directly(fake_github) -> None:
+    name = add_auto_merge_repo(fake_github)
+    fake_github.auto_merge_error = CLEAN_STATUS_ERROR
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == "merged (squash)"
+    assert auto_merge_calls(fake_github) == ["enable auto-merge 1", "merge pr 1"]
+    assert fake_github.find_open_pr(name, AUTO_MERGE_CONFIG.branch) is None
+
+
+def test_auto_merge_errors_do_not_fail_the_repository(fake_github) -> None:
+    name = add_auto_merge_repo(fake_github)
+    fake_github.auto_merge_error = "GraphQL: Auto merge is not allowed for this repository"
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == "failed: GraphQL: Auto merge is not allowed for this repository"
+    assert fake_github.repos[name].settings["delete_branch_on_merge"] is True
+    assert len(fake_github.repos[name].rulesets) == 1
+    assert "merge pr 1" not in fake_github.calls
+
+
+def test_merge_errors_do_not_fail_the_repository(fake_github) -> None:
+    name = add_auto_merge_repo(fake_github)
+    fake_github.auto_merge_error = CLEAN_STATUS_ERROR
+    fake_github.merge_error = "PUT /repos/owner/app/pulls/1/merge: HTTP 405: not mergeable"
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == (
+        "failed: PUT /repos/owner/app/pulls/1/merge: HTTP 405: not mergeable"
+    )
+    assert fake_github.repos[name].settings["delete_branch_on_merge"] is True
+    assert len(fake_github.repos[name].rulesets) == 1
