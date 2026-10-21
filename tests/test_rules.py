@@ -484,11 +484,26 @@ def test_ruleset_payload_without_checks() -> None:
                     "require_code_owner_review": False,
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": True,
-                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "allowed_merge_methods": ["squash"],
                 },
             },
         ],
     }
+
+
+def test_ruleset_payload_allows_only_squash_merge() -> None:
+    payload = ruleset_rule().payload("owner/app")
+    (pull_request,) = [rule for rule in payload["rules"] if rule["type"] == "pull_request"]
+    assert pull_request["parameters"]["allowed_merge_methods"] == ["squash"]
+
+
+def test_ruleset_with_all_merge_methods_is_outdated(with_server_defaults, make_workspace) -> None:
+    rule = ruleset_rule()
+    server = with_server_defaults(rule.payload("owner/app"), ruleset_id=7)
+    server["rules"][2]["parameters"]["allowed_merge_methods"] = ["merge", "squash", "rebase"]
+    workspace = make_workspace(rulesets=[server])
+    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is outdated", setting=True)]
+    assert workspace.ruleset_changes == [(NAME, 7, rule.payload("owner/app"))]
 
 
 def test_ruleset_checks_are_the_sorted_union_of_matching_globs() -> None:
