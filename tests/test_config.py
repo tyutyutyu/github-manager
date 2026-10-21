@@ -26,6 +26,12 @@ def test_defaults_apply(tmp_path: Path) -> None:
     assert config.exclude == ["old-*"]
     assert config.branch == "github-manager/compliance"
     assert not config.include_forks
+    assert not config.auto_merge
+
+
+def test_auto_merge_flag_is_parsed() -> None:
+    config = parse_config({"owners": ["me"], "rules": RULES, "auto_merge": True}, Path())
+    assert config.auto_merge
 
 
 @pytest.mark.parametrize(
@@ -37,6 +43,7 @@ def test_defaults_apply(tmp_path: Path) -> None:
         ({"owners": ["me", "Me"], "rules": RULES}, "duplicate owners: me"),
         ({"owners": ["me"], "rules": RULES, "brnach": "x"}, "unknown keys: brnach"),
         ({"owners": ["me"], "rules": RULES, "include_forks": "yes"}, "must be of type bool"),
+        ({"owners": ["me"], "rules": RULES, "auto_merge": "yes"}, "must be of type bool"),
         ({"owners": ["me"], "rules": [*RULES, RULES[0]]}, "duplicate rule ids: gi"),
         ({"owners": ["me"], "rules": ["x"]}, "must be a table"),
         ({"owners": ["me"], "rules": [{"id": "x", "type": "nope"}]}, "rule x: unknown type 'nope'"),

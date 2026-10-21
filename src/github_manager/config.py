@@ -21,6 +21,7 @@ class Config:
     rules: Sequence[Rule]
     exclude: list[str] = field(default_factory=list)
     include_forks: bool = False
+    auto_merge: bool = False
     branch: str = "github-manager/compliance"
     pr_title: str = "chore: align repository with central rules"
     commit_message: str = "chore: align repository with central rules"
@@ -55,6 +56,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path) -> Config:
             rules=rules,
             exclude=options.text_list("exclude", []),
             include_forks=options.flag("include_forks", defaults.include_forks),
+            auto_merge=options.flag("auto_merge", defaults.auto_merge),
             branch=options.text("branch", defaults.branch),
             pr_title=options.text("pr_title", defaults.pr_title),
             commit_message=options.text("commit_message", defaults.commit_message),

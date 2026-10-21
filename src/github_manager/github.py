@@ -30,6 +30,14 @@ mutation($input: CreateCommitOnBranchInput!) {
 }
 """
 
+AUTO_MERGE_MUTATION = """
+mutation($pullRequestId: ID!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: SQUASH}) {
+    pullRequest { number }
+  }
+}
+"""
+
 
 class GitHubError(Exception):
     def __init__(self, message: str, status: int | None = None) -> None:
@@ -50,6 +58,8 @@ class Repo:
 class PullRequest:
     number: int
     url: str
+    node_id: str = ""  # GraphQL id, needed to enable auto-merge
+    auto_merge: bool = False  # auto-merge is on, as of when the pull request was read
 
 
 type Opener = Callable[[urllib.request.Request], Any]
@@ -237,7 +247,7 @@ class GitHub:
         owner = repo.split("/", 1)[0]
         head = _q(f"{owner}:{branch}")
         pulls = self.call("GET", f"/repos/{repo}/pulls?state=open&head={head}")
-        return PullRequest(pulls[0]["number"], pulls[0]["html_url"]) if pulls else None
+        return _pull_request(pulls[0]) if pulls else None
 
     def create_pr(self, repo: str, base: str, head: str, title: str, body: str) -> PullRequest:
         pull = self.call(
@@ -245,7 +255,7 @@ class GitHub:
             f"/repos/{repo}/pulls",
             {"title": title, "head": head, "base": base, "body": body},
         )
-        return PullRequest(pull["number"], pull["html_url"])
+        return _pull_request(pull)
 
     def update_pr(self, repo: str, number: int, title: str, body: str) -> None:
         self.call("PATCH", f"/repos/{repo}/pulls/{number}", {"title": title, "body": body})
@@ -253,6 +263,14 @@ class GitHub:
     def close_pr(self, repo: str, number: int, comment: str) -> None:
         self.call("POST", f"/repos/{repo}/issues/{number}/comments", {"body": comment})
         self.call("PATCH", f"/repos/{repo}/pulls/{number}", {"state": "closed"})
+
+    def enable_auto_merge(self, repo: str, pull: PullRequest) -> None:
+        """Squash auto-merge; GitHub refuses it with a "clean status" error when the pull
+        request can already be merged."""
+        self.graphql(AUTO_MERGE_MUTATION, {"pullRequestId": pull.node_id})
+
+    def merge_pr(self, repo: str, number: int) -> None:
+        self.call("PUT", f"/repos/{repo}/pulls/{number}/merge", {"merge_method": "squash"})
 
     # --- repository rulesets (REST; PyGithub has no ruleset methods) ---------
 
@@ -288,6 +306,12 @@ class GitHub:
             self._client.get_repo(repo).edit(**settings)
         except GithubException as exc:
             raise _settings_error("PATCH", repo, exc) from exc
+
+
+def _pull_request(raw: dict[str, Any]) -> PullRequest:
+    return PullRequest(
+        raw["number"], raw["html_url"], raw["node_id"], raw.get("auto_merge") is not None
+    )
 
 
 def _settings_error(method: str, repo: str, exc: GithubException) -> GitHubError:

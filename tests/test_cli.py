@@ -190,3 +190,40 @@ def test_repository_errors_do_not_stop_the_run(fake_github, config_path, monkeyp
 def test_default_api_uses_resolved_token(monkeypatch) -> None:
     monkeypatch.setattr(cli, "resolve_token", lambda: "t")
     assert cli._default_api() is not None
+
+
+AUTO_MERGE_CONFIG = (
+    'owners = ["owner"]\nauto_merge = true\n'
+    '[[rules]]\nid = "gi"\ntype = "required_lines"\npath = ".gitignore"\nlines = ".env"\n'
+    '[[rules]]\nid = "dr"\ntype = "repo_ruleset"\nrequired_workflow_check = "verify"\n'
+)
+VERIFY_WORKFLOW = "on: pull_request\njobs:\n  verify:\n    runs-on: ubuntu-latest\n"
+
+
+def test_fix_prints_auto_merge_result_and_escapes_it_in_the_job_summary(
+    fake_github, tmp_path, monkeypatch, capsys
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    path = tmp_path / "c.toml"
+    path.write_text(AUTO_MERGE_CONFIG)
+    fake_github.add_repo("app", {".github/workflows/verify.yml": VERIFY_WORKFLOW})
+    fake_github.auto_merge_error = "GraphQL: not allowed | try\nlater"
+
+    assert run(fake_github, path, "fix", "--repo", "app") == EXIT_OK
+    output = capsys.readouterr().out
+    assert "    auto-merge  failed: GraphQL: not allowed | try\nlater\n" in output
+    assert "| owner/app | pull request created https://example/owner/app/pull/1 |" in (
+        summary.read_text()
+    )
+    assert "| failed: GraphQL: not allowed \\| try<br>later |" in summary.read_text()
+
+
+def test_fix_prints_why_auto_merge_was_skipped(fake_github, tmp_path, capsys) -> None:
+    path = tmp_path / "c.toml"
+    path.write_text(AUTO_MERGE_CONFIG)
+    fake_github.add_repo("app", {})
+
+    run(fake_github, path, "fix")
+
+    assert "    auto-merge  not enabled: verify is not required\n" in capsys.readouterr().out

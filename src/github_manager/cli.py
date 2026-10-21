@@ -130,6 +130,8 @@ def _print_report(console: Console, report: RepoReport, *, show_diff: bool) -> N
         padding = " " * (width - len(finding.rule_id) + 2)
         line = Text.assemble("    ", marker, "  ", (finding.rule_id, "bold"), padding)
         console.print(line.append(finding.message))
+    if report.auto_merge:
+        console.print(Text.assemble("    ", ("auto-merge", "bold"), "  ", report.auto_merge))
     if show_diff:
         for diff in report.diffs:
             for diff_line in diff.rstrip("\n").split("\n"):
@@ -162,10 +164,17 @@ def _write_step_summary(reports: list[RepoReport]) -> None:
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if not target:
         return
-    lines = ["| Repository | Result | Findings |", "| --- | --- | --- |"]
+    lines = ["| Repository | Result | Auto-merge | Findings |", "| --- | --- | --- | --- |"]
     for report in reports:
         findings = "<br>".join(f"{f.rule_id}: {f.message}" for f in report.findings)
         result = f"{report.outcome} {report.detail}".strip()
-        lines.append(f"| {report.repo} | {result} | {findings.replace('|', '\\|')} |")
+        lines.append(
+            f"| {report.repo} | {result} | {_cell(report.auto_merge)} | {_cell(findings)} |"
+        )
     with Path(target).open("a", encoding="utf-8") as summary:
         summary.write("\n".join(lines) + "\n")
+
+
+def _cell(text: str) -> str:
+    """Text safe inside a Markdown table cell: no `|`, no line break."""
+    return text.replace("|", "\\|").replace("\r", "").replace("\n", "<br>")
