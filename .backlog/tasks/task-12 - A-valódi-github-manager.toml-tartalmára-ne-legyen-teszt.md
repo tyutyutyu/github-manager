@@ -1,9 +1,11 @@
 ---
 id: TASK-12
 title: A valódi github-manager.toml tartalmára ne legyen teszt
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-21T19:14:00Z'
+updated_date: '2026-10-21T20:32:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -48,13 +50,33 @@ A valódi `github-manager.toml` tartalmára vonatkozó tesztellenőrzések megsz
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 test_repository_config_file_is_valid csak a valódi config betöltését ellenőrzi, tartalmi assert nélkül
-- [ ] #2 A github-manager.toml egy értékének megváltoztatása nem tör el tesztet
-- [ ] #3 A github-manager-rules skill nem írja elő a valódi config tartalmára vonatkozó assertek karbantartását
+- [x] #1 test_repository_config_file_is_valid csak a valódi config betöltését ellenőrzi, tartalmi assert nélkül
+- [x] #2 A github-manager.toml egy értékének megváltoztatása nem tör el tesztet
+- [x] #3 A github-manager-rules skill nem írja elő a valódi config tartalmára vonatkozó assertek karbantartását
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. tests/test_config.py: test_repository_config_file_is_valid csak load_config + assert config.rules; felesleges importok törlése (ruff --fix).
+2. .claude/skills/github-manager-rules/SKILL.md (gitignore-olt, lokális): a három érintett pontból kivenni a test_config assertek karbantartását; Verification: 'The real github-manager.toml is only loaded in a test, its content is never asserted.'
+3. uv run ruff format -q . && task verify; ellenőrzés módosított toml-lal.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+test_repository_config_file_is_valid törzse: load_config(...) + assert config.rules; a rules.py importok törölve (ruff --fix). Ellenőrzés: a toml '.DS_Store' sorát '.DS_Store_probe'-ra írva 'uv run pytest -q tests/test_config.py' -> 26 passed, majd visszaállítva. A skill (.claude/skills/github-manager-rules/SKILL.md, gitignore-olt: .gitignore:271 .claude/) három pontja átírva; 'test_config' már csak a 72. sorban, a Verification pontban szerepel ('The real github-manager.toml is only loaded in a test, its content is never asserted...'). uv run ruff format -q . -> fmt=0; task verify -> verify=0 (322 passed, 99.25% coverage, audit tiszta).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A test_repository_config_file_is_valid már csak azt ellenőrzi, hogy a valódi github-manager.toml betölthető és van benne szabály; a tartalmi assertek és a feleslegessé vált importok törölve, így config-változás nem igényel tesztmódosítást. A github-manager-rules skill (gitignore-olt, lokális fájl, nem része a diffnek) három pontja átírva: a valódi config tartalmára nem írunk assertet. Ellenőrzés ebben a sessionben: ruff format fmt=0, task verify verify=0 (322 passed); módosított toml-lal tests/test_config.py 26 passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
