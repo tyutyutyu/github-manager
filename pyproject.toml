@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Földházi István", email = "istvan.foldhazi@gmail.com" }
 ]
-requires-python = "==3.15.1"
+requires-python = "==3.15.2"
 dependencies = [
     "pygithub==2.10.0",
     "pyyaml==6.0.3",
