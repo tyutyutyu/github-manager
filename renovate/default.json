@@ -16,6 +16,11 @@
       "matchDepNames": ["python"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
+    },
+    {
+      "description": "Group all Kotlin Gradle plugins and artifacts with the Kotlin monorepo, also those without a source URL (e.g. org.jetbrains.kotlin.plugin.compose)",
+      "matchPackageNames": ["/^org\\.jetbrains\\.kotlin[.:]/"],
+      "groupName": "kotlin monorepo"
     }
   ]
 }
