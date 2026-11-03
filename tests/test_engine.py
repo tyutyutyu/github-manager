@@ -19,6 +19,7 @@ from github_manager.rules import (
     RepoRuleset,
     RepoSettings,
     RepoVisibility,
+    RequiredFiles,
     RequiredLines,
     SelfHostedRunners,
 )
@@ -605,6 +606,47 @@ def test_visibility_finding_goes_to_manual_section_of_pull_request(fake_github) 
     _, body, _ = fake_github.pulls[name][1]
     assert '### Needs manual action\n- rv: visibility is "public", expected "private"' in body
     assert fake_github.repos[name].settings == {"visibility": "public"}
+
+
+REQUIRED_FILES_RULE = RequiredFiles.from_options(
+    {"id": "rf", "paths": [".github/workflows/sonarqube.yml"]}, Path()
+)
+WRITE_CALLS = (
+    "reset",
+    "delete",
+    "commit",
+    "create",
+    "update",
+    "enable",
+    "merge",
+    "close",
+    "settings",
+)
+
+
+def test_required_files_missing_is_manual_and_never_written(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[REQUIRED_FILES_RULE])
+    name = fake_github.add_repo("app", {"README.md": "x"})
+
+    for fix in (False, True):
+        report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=fix)
+        assert report.outcome is Outcome.NEEDS_FIX
+        assert [finding.message for finding in report.manual_findings] == [
+            ".github/workflows/sonarqube.yml: missing"
+        ]
+        assert report.diffs == []
+    assert not [call for call in fake_github.calls if call.startswith(WRITE_CALLS)]
+    assert fake_github.pulls[name] == {}
+    assert fake_github.files_at(name, "main") == {"README.md": "x"}
+
+
+def test_required_files_present_is_compliant(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[REQUIRED_FILES_RULE])
+    fake_github.add_repo("app", {".github/workflows/sonarqube.yml": "on: push\n"})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.COMPLIANT
+    assert not [call for call in fake_github.calls if call.startswith(WRITE_CALLS)]
 
 
 def test_self_hosted_runners_fix_opens_pull_request_with_rewritten_workflow(fake_github) -> None:
