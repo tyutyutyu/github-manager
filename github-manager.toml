@@ -152,6 +152,16 @@ type = "required_files"
 paths = [".github/workflows/sonarqube.yml"]
 exclude = ["tyutyutyu/*"]
 
+[[rules]]
+id = "sonarqube-main-only"
+type = "default_branch_push_only"
+# The SonarQube Community Build analyses a single branch: an analysis of a pull request,
+# Renovate or any other branch overwrites the result of main. So the SonarQube workflow
+# may only run on pushes to the default branch (no pull_request, workflow_dispatch,
+# schedule or other trigger). Deviations are reported ([manual]); nothing is written.
+path = ".github/workflows/sonarqube.yml"
+exclude = ["tyutyutyu/*"]
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"

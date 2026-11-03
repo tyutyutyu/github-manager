@@ -1009,6 +1009,105 @@ def _workflow_files(listed: list[str]) -> list[str]:
     ]
 
 
+PUSH = "push"
+# Keys under `push` that are forbidden: `paths` and `paths-ignore` only narrow the trigger.
+PUSH_FORBIDDEN_FILTERS = ("branches-ignore", "tags", "tags-ignore")
+
+
+@dataclass(frozen=True, kw_only=True)
+class DefaultBranchPushOnly(Rule):
+    """The workflow file `path` must run only on pushes to the default branch.
+
+    Its `on` must be a mapping whose only trigger is `push`, with a `branches` filter that is
+    exactly the default branch (no glob, no negation, no other branch) and no
+    `branches-ignore`, `tags` or `tags-ignore`; `paths` and `paths-ignore` are allowed. Every
+    deviation needs manual action; a missing file is not reported and nothing is written.
+    """
+
+    type_name: ClassVar[str] = "default_branch_push_only"
+
+    path: str
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        path = options.text("path", REQUIRED)
+        name = path.removeprefix(WORKFLOWS_DIR)
+        if (
+            name == path
+            or "/" in name
+            or not name.endswith((".yml", ".yaml"))
+            or name in (".yml", ".yaml")
+        ):
+            raise ValueError(
+                f"'path' {path!r} must be a .yml or .yaml file directly in {WORKFLOWS_DIR}"
+            )
+        return cls(path=path, **common)
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        text = workspace.read(self.path)
+        if text is None:
+            return []
+        problem = _push_only_problem(text, workspace.default_branch)
+        if problem is None:
+            return []
+        return [Finding(self.id, f"{self.path}: {problem}", fixable=False)]
+
+
+def _push_only_problem(text: str, branch: str) -> str | None:
+    """The first reason the workflow does not run only on pushes to `branch`; None if it does."""
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        return f"invalid YAML ({getattr(exc, 'problem', None) or 'invalid'})"
+    if not isinstance(root, yaml.MappingNode):
+        return "invalid YAML (the root is not a mapping)"
+    # PyYAML (YAML 1.1) loads the key `on` as True, but the node holds the text.
+    _, trigger = _entry(root, "on")
+    if trigger is None:
+        return "no 'on' trigger"
+    triggers = _mapping(trigger)
+    if triggers is None:
+        return (
+            f"'on' is {_shown(trigger)}, not a mapping: "
+            "without a push branches filter it runs on every branch"
+        )
+    others = sorted(name for name in triggers if name != PUSH)
+    if others:
+        return f"other triggers: {', '.join(others)} (only push to {branch} is allowed)"
+    if PUSH not in triggers:
+        return "no push trigger"
+    return _push_filter_problem(_mapping(triggers[PUSH]) or {}, branch)
+
+
+def _shown(node: yaml.Node) -> str:
+    """A message rendering of a non-mapping YAML node that never constructs its value."""
+    patterns = _patterns(node)
+    if patterns is not None:
+        return json.dumps(patterns[0] if isinstance(node, yaml.ScalarNode) else patterns)
+    if isinstance(node, yaml.ScalarNode):
+        return node.value or "empty"
+    return "a list with non-string items"
+
+
+def _push_filter_problem(filters: dict[str, yaml.Node], branch: str) -> str | None:
+    if "branches" not in filters:
+        return "push has no branches filter (it runs on every branch)"
+    patterns = _patterns(filters["branches"])
+    if patterns is None:
+        return "push branches cannot be read"
+    if patterns != [branch]:
+        return (
+            f"push branches {json.dumps(patterns)} must be exactly "
+            f"{json.dumps([branch])} (the default branch)"
+        )
+    forbidden = [key for key in PUSH_FORBIDDEN_FILTERS if key in filters]
+    if forbidden:
+        return (
+            f"push has {', '.join(forbidden)} (only branches, paths and paths-ignore are allowed)"
+        )
+    return None
+
+
 class _Problem(NamedTuple):
     """Why a workflow file does not run a check; a higher `stage` is closer to a valid file."""
 
@@ -1231,6 +1330,7 @@ RULE_TYPES: dict[str, type[Rule]] = {
         RepoRuleset,
         RepoVisibility,
         RequiredFiles,
+        DefaultBranchPushOnly,
         SelfHostedRunners,
     )
 }
