@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from github_manager.rules import (
     RepoRuleset,
     RepoSettings,
     RepoVisibility,
+    RequiredFiles,
     RequiredLines,
     SelfHostedRunners,
     ruleset_matches,
@@ -1049,6 +1051,73 @@ def test_repo_visibility_unreadable_is_manual(make_workspace) -> None:
 def test_repo_visibility_rejects_invalid_options(options, message) -> None:
     with pytest.raises(ValueError, match=message):
         RepoVisibility.from_options({"id": "rv", **options}, Path())
+
+
+# --- required_files ----------------------------------------------------------
+
+SONAR = ".github/workflows/sonarqube.yml"
+
+
+def required_files(*paths: str) -> RequiredFiles:
+    return RequiredFiles.from_options({"id": "rf", "paths": list(paths) or [SONAR]}, Path())
+
+
+def test_required_files_existing_file_has_no_finding(make_workspace) -> None:
+    workspace = make_workspace({SONAR: "on: push\n"})
+    assert required_files().apply(workspace) == []
+    assert workspace.files == {SONAR: "on: push\n"}
+
+
+def test_required_files_empty_existing_file_counts_as_present(make_workspace) -> None:
+    assert required_files().apply(make_workspace({SONAR: ""})) == []
+
+
+def test_required_files_missing_file_is_manual_and_nothing_is_written(make_workspace) -> None:
+    workspace = make_workspace({"README.md": "x"})
+    assert required_files().apply(workspace) == [Finding("rf", f"{SONAR}: missing", fixable=False)]
+    assert workspace.files == {"README.md": "x"}
+    assert workspace.settings == {}
+    assert workspace.ruleset_changes == []
+
+
+def test_required_files_reports_every_missing_file_in_order(make_workspace) -> None:
+    workspace = make_workspace({"b.txt": "b"})
+    assert required_files("c.txt", "b.txt", "a/d.txt").apply(workspace) == [
+        Finding("rf", "c.txt: missing", fixable=False),
+        Finding("rf", "a/d.txt: missing", fixable=False),
+    ]
+
+
+def test_required_files_sees_pending_writes_of_earlier_rules(make_workspace) -> None:
+    workspace = make_workspace()
+    workspace.write(SONAR, "on: push\n")
+    assert required_files().apply(workspace) == []
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({}, "missing required key 'paths'"),
+        ({"paths": []}, "'paths' must not be empty"),
+        ({"paths": "a.txt"}, "'paths' must be of type list"),
+        ({"paths": [""]}, "'paths' must be a list of non-empty strings"),
+        ({"paths": [1]}, "'paths' must be a list of non-empty strings"),
+        ({"paths": ["/a.txt"]}, "'paths' item '/a.txt' must not start or end with '/'"),
+        ({"paths": ["dir/"]}, "'paths' item 'dir/' must not start or end with '/'"),
+        ({"paths": ["../a.txt"]}, "'paths' item '../a.txt' must not contain a '..' segment"),
+        ({"paths": ["a/../b"]}, "'paths' item 'a/../b' must not contain a '..' segment"),
+        ({"paths": ["a.txt", "b", "a.txt"]}, "duplicate 'paths' items: a.txt"),
+        ({"paths": ["a.txt"], "typo": 1}, "unknown keys: typo"),
+    ],
+)
+def test_required_files_rejects_invalid_options(options, message) -> None:
+    with pytest.raises(ValueError, match=re.escape(message)):
+        RequiredFiles.from_options({"id": "rf", **options}, Path())
+
+
+def test_required_files_accepts_dotted_names() -> None:
+    rule = RequiredFiles.from_options({"id": "rf", "paths": ["..hidden", "a/.b"]}, Path())
+    assert rule.paths == ["..hidden", "a/.b"]
 
 
 # --- self_hosted_runners -----------------------------------------------------

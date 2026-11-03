@@ -143,6 +143,15 @@ allowed_runs_on = [["self-hosted"]]
 runs_on = ["self-hosted"]
 exclude = []
 
+[[rules]]
+id = "sonarqube-workflow"
+type = "required_files"
+# Every tyutyutyu-org repository needs its own SonarQube workflow. Only the existence of
+# the file is checked, not its content (it differs per project); a missing file is
+# reported ([manual]) and nothing is written.
+paths = [".github/workflows/sonarqube.yml"]
+exclude = ["tyutyutyu/*"]
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"

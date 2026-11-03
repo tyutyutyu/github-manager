@@ -752,6 +752,41 @@ class RepoVisibility(Rule):
         return [Finding(self.id, message, fixable=False)]
 
 
+@dataclass(frozen=True, kw_only=True)
+class RequiredFiles(Rule):
+    """Every file in `paths` must exist in the repository.
+
+    Only the existence is checked, not the content. The content differs per project and
+    cannot be generated, so every missing file needs manual action and nothing is written.
+    """
+
+    type_name: ClassVar[str] = "required_files"
+
+    paths: list[str]
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        paths = options.text_list("paths", REQUIRED)
+        if not paths:
+            raise ValueError("'paths' must not be empty")
+        for path in paths:
+            if path.startswith("/") or path.endswith("/"):
+                raise ValueError(f"'paths' item {path!r} must not start or end with '/'")
+            if ".." in path.split("/"):
+                raise ValueError(f"'paths' item {path!r} must not contain a '..' segment")
+        duplicates = sorted(path for path, count in Counter(paths).items() if count > 1)
+        if duplicates:
+            raise ValueError(f"duplicate 'paths' items: {', '.join(duplicates)}")
+        return cls(paths=paths, **common)
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        return [
+            Finding(self.id, f"{path}: missing", fixable=False)
+            for path in self.paths
+            if workspace.read(path) is None
+        ]
+
+
 WORKFLOWS_DIR = ".github/workflows/"
 SELF_HOSTED = "self-hosted"
 UBUNTU_PATTERN = "ubuntu-*"
@@ -1195,6 +1230,7 @@ RULE_TYPES: dict[str, type[Rule]] = {
         RepoSettings,
         RepoRuleset,
         RepoVisibility,
+        RequiredFiles,
         SelfHostedRunners,
     )
 }

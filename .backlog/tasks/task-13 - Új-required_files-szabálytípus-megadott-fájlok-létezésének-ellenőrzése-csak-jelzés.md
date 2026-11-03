@@ -3,9 +3,10 @@ id: TASK-13
 title: >-
   Új required_files szabálytípus: megadott fájlok létezésének ellenőrzése (csak
   jelzés)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-03T21:17:00Z'
+updated_date: '2026-11-03T22:11:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -65,16 +66,30 @@ Meglévő minták: `RepoVisibility` (`src/github_manager/rules.py`) a csak jelz�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A required_files szabálytípus regisztrálva van; a paths lista minden hiányzó fájljára fixable=False finding „<path>: missing” üzenettel, létező fájlra nincs finding
-- [ ] #2 A szabály check és fix módban sem ír a repóba, nem nyit PR-t és nem módosít beállítást vagy rulesetet
-- [ ] #3 Üres paths, abszolút vagy / végű út, .. szegmens, duplikált elem és ismeretlen kulcs config-hiba
-- [ ] #4 A github-manager.toml-ban sonarqube-workflow szabály: paths = [".github/workflows/sonarqube.yml"], exclude = ["tyutyutyu/*"]
-- [ ] #5 README Rule types tábla és a Not fixed automatically lista, valamint a github-manager-rules skill leírja a szabályt
+- [x] #1 A required_files szabálytípus regisztrálva van; a paths lista minden hiányzó fájljára fixable=False finding „<path>: missing” üzenettel, létező fájlra nincs finding
+- [x] #2 A szabály check és fix módban sem ír a repóba, nem nyit PR-t és nem módosít beállítást vagy rulesetet
+- [x] #3 Üres paths, abszolút vagy / végű út, .. szegmens, duplikált elem és ismeretlen kulcs config-hiba
+- [x] #4 A github-manager.toml-ban sonarqube-workflow szabály: paths = [".github/workflows/sonarqube.yml"], exclude = ["tyutyutyu/*"]
+- [x] #5 README Rule types tábla és a Not fixed automatically lista, valamint a github-manager-rules skill leírja a szabályt
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-13-uj-required-files-szabalytipus-megadott-fajlok-l.
+
+Finalization verification (2026-11-03): uv run ruff format -q . && task verify passed (431 tests, 99.31% branch coverage, ruff/ty/deptry/audit/build OK). uv run github-manager repos loaded the real config and listed repos (exit 0). .claude/skills/github-manager-rules/SKILL.md has a 'required_files rule' section; git check-ignore: '.gitignore:265:.claude/', so it is not in the diff (as planned). exclude = ["tyutyutyu/*"] matches OWNER/NAME via Rule.applies_to, so only tyutyutyu-org repos are checked.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the generic report-only required_files rule type (RequiredFiles in src/github_manager/rules.py, registered in RULE_TYPES). Every missing file in 'paths' yields Finding(id, '<path>: missing', fixable=False) in paths order; existing (even empty or pending-written) files yield nothing; the rule never writes, opens PRs or changes settings/rulesets. Config errors: missing/empty paths, non-string/empty items, leading/trailing '/', '..' segment, duplicates, unknown keys. github-manager.toml got the sonarqube-workflow rule (paths = [".github/workflows/sonarqube.yml"], exclude = ["tyutyutyu/*"]) with a comment; README Rule types table and 'Not fixed automatically' list and the (git-ignored) github-manager-rules skill document it. Tests: unit tests in tests/test_rules.py and engine tests in tests/test_engine.py (check+fix mode, no write calls, no PR) using synthetic config. Verification: ruff format + task verify green (431 passed, 99.31% coverage); github-manager repos loads the real config. Risk (intentional): every tyutyutyu-org repo reports a manual finding until a hand-written sonarqube.yml is added; trigger check is a separate follow-up task.
+<!-- SECTION:FINAL_SUMMARY:END -->
