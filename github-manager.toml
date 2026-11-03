@@ -5,11 +5,9 @@
 
 owners = ["tyutyutyu", "tyutyutyu-org"]
 exclude = [
-    "tyutyutyu-org/tyutyutyu-bridge",
     "tyutyutyu-org/tyutyutyu-coding-agent",
     "tyutyutyu-org/update-notifier",
     "tyutyutyu/apple__site-finder",
-    "tyutyutyu/battery-tracker-app",
     "tyutyutyu/bedrock-server-map",
     "tyutyutyu/docker-image-stats",
     "tyutyutyu/finance_assistant",
@@ -22,11 +20,8 @@ exclude = [
     "tyutyutyu/news-indexer-page-parsers",
     "tyutyutyu/pdf-titan",
     "tyutyutyu/release-notes-news",
-    "tyutyutyu/relevant-tools",
     "tyutyutyu/task-center",
     "tyutyutyu/tyutyutyu",
-    "tyutyutyu/tyutyutyu-backup",
-    "tyutyutyu/tyutyutyu-dashboard",
     "tyutyutyu/tyutyutyu-dashboard-extension",
     "tyutyutyu/tyutyutyu-ecosystem",
     "tyutyutyu/tyutyutyu-gcp-personal",
@@ -123,7 +118,7 @@ required_status_checks = { "tyutyutyu-org/youtube-mirror" = ["test"] }
 # `branches` filter skips the default branch, or one whose `types` filter leaves out
 # opened, synchronize or reopened. Case matters.
 required_workflow_check = "verify"
-strict_required_status_checks = false
+strict_required_status_checks = true
 exclude = []
 
 [[rules]]
