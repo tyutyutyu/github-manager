@@ -14,6 +14,7 @@ from github_manager.engine import (
 from github_manager.github import GitHubError
 from github_manager.rules import (
     BranchStrategy,
+    DefaultBranchPushOnly,
     FileSync,
     RenovatePreset,
     RepoRuleset,
@@ -646,6 +647,43 @@ def test_required_files_present_is_compliant(fake_github) -> None:
 
     report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
     assert report.outcome is Outcome.COMPLIANT
+    assert not [call for call in fake_github.calls if call.startswith(WRITE_CALLS)]
+
+
+PUSH_ONLY_RULE = DefaultBranchPushOnly.from_options(
+    {"id": "po", "path": ".github/workflows/sonarqube.yml"}, Path()
+)
+
+
+def test_default_branch_push_only_violation_is_manual_and_never_written(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[PUSH_ONLY_RULE])
+    files = {".github/workflows/sonarqube.yml": "on:\n  push:\n  workflow_dispatch:\n"}
+    name = fake_github.add_repo("app", files)
+
+    for fix in (False, True):
+        report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=fix)
+        assert report.outcome is Outcome.NEEDS_FIX
+        assert [finding.message for finding in report.manual_findings] == [
+            ".github/workflows/sonarqube.yml: other triggers: workflow_dispatch "
+            "(only push to main is allowed)"
+        ]
+        assert report.diffs == []
+    assert not [call for call in fake_github.calls if call.startswith(WRITE_CALLS)]
+    assert fake_github.pulls[name] == {}
+    assert fake_github.files_at(name, "main") == files
+
+
+def test_default_branch_push_only_valid_or_missing_file_is_compliant(fake_github) -> None:
+    config = Config(owners=["owner"], rules=[PUSH_ONLY_RULE])
+    workflow = "on:\n  push:\n    branches: [trunk]\n"
+    fake_github.add_repo(
+        "app", {".github/workflows/sonarqube.yml": workflow}, default_branch="trunk"
+    )
+    fake_github.add_repo("other", {"README.md": "x"})
+
+    for repo in ("app", "other"):
+        report = process_repo(fake_github, config, repo_named(fake_github, repo), fix=True)
+        assert report.outcome is Outcome.COMPLIANT
     assert not [call for call in fake_github.calls if call.startswith(WRITE_CALLS)]
 
 

@@ -6,7 +6,9 @@ import pytest
 
 from github_manager.rules import (
     NOT_READABLE,
+    RULE_TYPES,
     BranchStrategy,
+    DefaultBranchPushOnly,
     FileSync,
     Finding,
     RenovatePreset,
@@ -1118,6 +1120,169 @@ def test_required_files_rejects_invalid_options(options, message) -> None:
 def test_required_files_accepts_dotted_names() -> None:
     rule = RequiredFiles.from_options({"id": "rf", "paths": ["..hidden", "a/.b"]}, Path())
     assert rule.paths == ["..hidden", "a/.b"]
+
+
+# --- default_branch_push_only ------------------------------------------------
+
+
+def push_only(**overrides) -> DefaultBranchPushOnly:
+    return DefaultBranchPushOnly.from_options({"id": "po", "path": SONAR, **overrides}, Path())
+
+
+def push_only_findings(make_workspace, text: str, default_branch: str = "main") -> list[Finding]:
+    workspace = make_workspace({SONAR: text}, default_branch=default_branch)
+    findings = push_only().apply(workspace)
+    assert workspace.files == {SONAR: text}
+    assert workspace.settings == {}
+    assert workspace.ruleset_changes == []
+    return findings
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "on:\n  push:\n    branches: [main]\njobs: {}\n",
+        "on:\n  push:\n    branches: main\n",
+        "on:\n  push:\n    branches:\n      - main\n    paths: [src/**]\n",
+        "on:\n  push:\n    branches: [main]\n    paths-ignore: [docs/**]\n",
+        '"on":\n  push:\n    branches: [main]\n',
+    ],
+)
+def test_default_branch_push_only_accepts_push_to_default_branch(make_workspace, text) -> None:
+    assert push_only_findings(make_workspace, text) == []
+
+
+def test_default_branch_push_only_follows_the_workspace_default_branch(make_workspace) -> None:
+    text = "on:\n  push:\n    branches: [master]\n"
+    assert push_only_findings(make_workspace, text, default_branch="master") == []
+    assert push_only_findings(make_workspace, text) == [
+        Finding(
+            "po",
+            f'{SONAR}: push branches ["master"] must be exactly ["main"] (the default branch)',
+            fixable=False,
+        )
+    ]
+
+
+def test_default_branch_push_only_missing_file_has_no_finding(make_workspace) -> None:
+    workspace = make_workspace({"README.md": "x"})
+    assert push_only().apply(workspace) == []
+    assert workspace.files == {"README.md": "x"}
+
+
+NO_FILTER = "without a push branches filter it runs on every branch"
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        ("on: push\n", f"'on' is \"push\", not a mapping: {NO_FILTER}"),
+        ("on: [push]\n", f"'on' is [\"push\"], not a mapping: {NO_FILTER}"),
+        ("on: !custom push\n", f"'on' is push, not a mapping: {NO_FILTER}"),
+        ("on: 1\n", f"'on' is 1, not a mapping: {NO_FILTER}"),
+        ("on:\n", f"'on' is empty, not a mapping: {NO_FILTER}"),
+        ("on: &a [*a]\n", f"'on' is a list with non-string items, not a mapping: {NO_FILTER}"),
+        (
+            "on:\n  push:\n    branches: [main]\n  pull_request:\n",
+            "other triggers: pull_request (only push to main is allowed)",
+        ),
+        (
+            "on:\n  workflow_dispatch:\n  push:\n    branches: [main]\n  pull_request:\n",
+            "other triggers: pull_request, workflow_dispatch (only push to main is allowed)",
+        ),
+        (
+            "on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: '0 0 * * *'\n",
+            "other triggers: schedule (only push to main is allowed)",
+        ),
+        (
+            "on:\n  push:\n    branches: [main]\n  pull_request_target:\n  workflow_call:\n",
+            "other triggers: pull_request_target, workflow_call (only push to main is allowed)",
+        ),
+        (
+            "on:\n  workflow_dispatch:\n",
+            "other triggers: workflow_dispatch (only push to main is allowed)",
+        ),
+        ("on: {}\n", "no push trigger"),
+        ("on:\n  push:\n", "push has no branches filter (it runs on every branch)"),
+        (
+            "on:\n  push:\n    paths: [src/**]\n",
+            "push has no branches filter (it runs on every branch)",
+        ),
+        (
+            'on:\n  push:\n    branches: ["main", "renovate/**"]\n',
+            'push branches ["main", "renovate/**"] must be exactly ["main"] (the default branch)',
+        ),
+        (
+            'on:\n  push:\n    branches: ["*"]\n',
+            'push branches ["*"] must be exactly ["main"] (the default branch)',
+        ),
+        (
+            'on:\n  push:\n    branches: ["!main"]\n',
+            'push branches ["!main"] must be exactly ["main"] (the default branch)',
+        ),
+        (
+            "on:\n  push:\n    branches: []\n",
+            'push branches [] must be exactly ["main"] (the default branch)',
+        ),
+        ("on:\n  push:\n    branches: [{a: 1}]\n", "push branches cannot be read"),
+        (
+            "on:\n  push:\n    branches: [main]\n    branches-ignore: [renovate/**]\n",
+            "push has branches-ignore (only branches, paths and paths-ignore are allowed)",
+        ),
+        (
+            "on:\n  push:\n    branches: [main]\n    tags: [v*]\n",
+            "push has tags (only branches, paths and paths-ignore are allowed)",
+        ),
+        (
+            "on:\n  push:\n    branches: [main]\n    tags-ignore: [v*]\n    tags: [x]\n",
+            "push has tags, tags-ignore (only branches, paths and paths-ignore are allowed)",
+        ),
+        ("jobs: {}\n", "no 'on' trigger"),
+        ("on: [\n", "invalid YAML (expected the node content, but found '<stream end>')"),
+        ("a: 1\n---\nb: 2\n", "invalid YAML (but found another document)"),
+        ("- on\n", "invalid YAML (the root is not a mapping)"),
+        ("", "invalid YAML (the root is not a mapping)"),
+    ],
+)
+def test_default_branch_push_only_reports_the_reason(make_workspace, text, problem) -> None:
+    assert push_only_findings(make_workspace, text) == [
+        Finding("po", f"{SONAR}: {problem}", fixable=False)
+    ]
+
+
+def test_default_branch_push_only_registers_its_type() -> None:
+    assert RULE_TYPES["default_branch_push_only"] is DefaultBranchPushOnly
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"path": None}, "missing required key 'path'"),
+        ({"path": ""}, "'path' must not be empty"),
+        ({"path": 1}, "'path' must be of type str"),
+        ({"path": "sonarqube.yml"}, None),
+        ({"path": ".github/sonarqube.yml"}, None),
+        ({"path": ".github/workflows/sub/sonarqube.yml"}, None),
+        ({"path": ".github/workflows/sonarqube.json"}, None),
+        ({"path": ".github/workflows/.yml"}, None),
+        ({"path": ".github/workflows/"}, None),
+        ({"path": SONAR, "typo": 1}, "unknown keys: typo"),
+    ],
+)
+def test_default_branch_push_only_rejects_invalid_options(options, message) -> None:
+    raw = {"id": "po", **{key: value for key, value in options.items() if value is not None}}
+    expected = message or (
+        f"'path' {options['path']!r} must be a .yml or .yaml file directly in .github/workflows/"
+    )
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        DefaultBranchPushOnly.from_options(raw, Path())
+
+
+def test_default_branch_push_only_accepts_yaml_extension() -> None:
+    rule = DefaultBranchPushOnly.from_options(
+        {"id": "po", "path": ".github/workflows/sonar.yaml"}, Path()
+    )
+    assert rule.path == ".github/workflows/sonar.yaml"
 
 
 # --- self_hosted_runners -----------------------------------------------------

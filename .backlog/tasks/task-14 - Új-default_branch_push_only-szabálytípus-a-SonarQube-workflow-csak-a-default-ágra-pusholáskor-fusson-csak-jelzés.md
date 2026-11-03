@@ -3,9 +3,10 @@ id: TASK-14
 title: >-
   Új default_branch_push_only szabálytípus: a SonarQube workflow csak a default
   ágra pusholáskor fusson (csak jelzés)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-03T21:18:00Z'
+updated_date: '2026-11-03T22:42:00Z'
 labels: []
 dependencies:
   - TASK-13
@@ -72,18 +73,32 @@ Meglévő építőelemek a `src/github_manager/rules.py`-ban (TASK-11): `yaml.co
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A default_branch_push_only szabálytípus regisztrálva van; a path workflow-ra nincs finding, ha az on csak push, és a branches szűrő pontosan a default ág
-- [ ] #2 on: push string vagy lista, más trigger (pull_request, pull_request_target, workflow_dispatch, schedule, workflow_call stb.), hiányzó vagy többelemű branches, glob vagy negált minta, branches-ignore, tags, tags-ignore, hiányzó on és YAML-hiba esetén fixable=False finding nevezi meg az okot
-- [ ] #3 paths és paths-ignore szűrő mellett a workflow érvényes
-- [ ] #4 Hiányzó fájlra nincs finding; a szabály soha nem ír és nem nyit PR-t
-- [ ] #5 Nem a WORKFLOWS_DIR közvetlen .yml/.yaml gyerekét megadó path config-hiba
-- [ ] #6 A github-manager.toml-ban sonarqube-main-only szabály path = ".github/workflows/sonarqube.yml", exclude = ["tyutyutyu/*"]
-- [ ] #7 README Rule types tábla és a Not fixed automatically lista, valamint a github-manager-rules skill leírja a szabályt
+- [x] #1 A default_branch_push_only szabálytípus regisztrálva van; a path workflow-ra nincs finding, ha az on csak push, és a branches szűrő pontosan a default ág
+- [x] #2 on: push string vagy lista, más trigger (pull_request, pull_request_target, workflow_dispatch, schedule, workflow_call stb.), hiányzó vagy többelemű branches, glob vagy negált minta, branches-ignore, tags, tags-ignore, hiányzó on és YAML-hiba esetén fixable=False finding nevezi meg az okot
+- [x] #3 paths és paths-ignore szűrő mellett a workflow érvényes
+- [x] #4 Hiányzó fájlra nincs finding; a szabály soha nem ír és nem nyit PR-t
+- [x] #5 Nem a WORKFLOWS_DIR közvetlen .yml/.yaml gyerekét megadó path config-hiba
+- [x] #6 A github-manager.toml-ban sonarqube-main-only szabály path = ".github/workflows/sonarqube.yml", exclude = ["tyutyutyu/*"]
+- [x] #7 README Rule types tábla és a Not fixed automatically lista, valamint a github-manager-rules skill leírja a szabályt
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-14-uj-default-branch-push-only-szabalytipus-a-sonar.
+
+Finalization 2026-11-03: `uv run ruff format -q . && task verify` passed (format, lint, ty, deptry, 479 tests, 99.40% branch coverage, audit, build). `uv run github-manager repos` loads the real config. Review repair: non-mapping `on` is rendered by `_shown` without constructing the node (tags, aliases, numbers, empty value). tests/test_config.py only checks that the real config loads (pre-existing, not part of this diff).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the report-only `default_branch_push_only` rule type (`DefaultBranchPushOnly` in src/github_manager/rules.py, registered in RULE_TYPES). For the workflow at `path` (must be a direct .yml/.yaml child of .github/workflows/, else config error) it reports one fixable=False finding naming the first problem unless `on` is a mapping whose only trigger is `push` with `branches` exactly equal to the workspace default branch and no branches-ignore/tags/tags-ignore; paths/paths-ignore are allowed; a missing file yields no finding and nothing is ever written. github-manager.toml gained `sonarqube-main-only` (path .github/workflows/sonarqube.yml, exclude tyutyutyu/*) because the SonarQube Community Build analyses a single branch. README and the github-manager-rules skill describe the rule. Verification: `uv run ruff format -q . && task verify` green (479 tests, 99.40% coverage); real config loads via `uv run github-manager repos`. Risk: the static check ignores job-level `if:`, so workflow_dispatch is deliberately forbidden.
+<!-- SECTION:FINAL_SUMMARY:END -->

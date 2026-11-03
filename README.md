@@ -61,13 +61,15 @@ Exit codes: `0` compliant (or every finding has a pull request), `1` findings re
 | `branch_strategy` | the default branch is `default_branch` (default `main`) and none of `forbidden_branches` (default `["develop"]`) exists | none: reported as *manual* |
 | `repo_visibility` | the repository has the visibility given by `visibility = { "<owner>" = "public" \| "private" }` for its owner (case-insensitive; owners missing from the table are not checked, and every key must be listed in `owners`) | none: reported as *manual* (changing the visibility or transferring the repository is a human decision) |
 | `required_files` | every file in `paths` (a non-empty list of repository-relative paths, e.g. `[".github/workflows/sonarqube.yml"]`; no leading or trailing `/`, no `..` segment, no duplicates) exists; only the existence is checked, not the content | none: reported as *manual* (one finding per missing file; nothing is written) |
+| `default_branch_push_only` | the workflow file `path` (a direct `.yml`/`.yaml` child of `.github/workflows/`, e.g. `.github/workflows/sonarqube.yml`) runs only on pushes to the default branch: its `on` is a mapping whose only trigger is `push`, with a `branches` filter that is exactly the default branch (no glob, no `!` negation, no other branch) and no `branches-ignore`, `tags` or `tags-ignore`; `paths` and `paths-ignore` are allowed; a missing file is not reported | none: reported as *manual* (one finding naming the first problem; nothing is written) |
 | `self_hosted_runners` | in private and internal repositories (public ones are not checked), the `runs-on` of every job in `.github/workflows/*.yml\|*.yaml` equals one of the label sets in `allowed_runs_on = [["self-hosted"]]` (exact match as a set, case-insensitive; every set must contain `self-hosted`) | rewrites the `runs-on` of a job to `runs_on` (required, e.g. `["self-hosted"]`; it must equal one of the `allowed_runs_on` sets) in the pull request when it is a single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed (e.g. `[self-hosted, Linux, X64, zhukov]`) and the value sits on the same line as the `runs-on` key (a scalar or a one-line list); only that value changes, the rest of the file stays byte for byte the same, and the file is re-parsed to check the result before it is written. Everything else is reported as *manual* (see below); local `uses: ./...` calls are skipped |
 
 Not fixed automatically (reported as *manual*): several Renovate configs in one repo,
 invalid JSON, `.json5` configs, settings the token cannot read, several rulesets with
 the same managed name, rulesets on a private repository of the GitHub Free plan, and a
 repository whose visibility differs from `repo_visibility`, a file listed in
-`required_files` that does not exist, and a job of a private or
+`required_files` that does not exist, a `default_branch_push_only` workflow that can
+run on anything but a push to the default branch, and a job of a private or
 internal repository whose `runs-on` `self_hosted_runners` cannot rewrite: `windows-*`,
 `macos-*` and other unknown labels, expressions, matrices, mappings, external reusable
 workflows, unparsable files, and values it cannot replace safely (a multi-line list, an
