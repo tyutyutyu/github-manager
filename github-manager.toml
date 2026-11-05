@@ -82,6 +82,18 @@ remove_lines = [".claude/autoharness/"]
 exclude = []
 
 [[rules]]
+id = "gitattributes-baseline"
+type = "required_lines"
+path = ".gitattributes"
+# Managed block between "# >>> github-manager: gitattributes-baseline" and
+# "# <<< github-manager: gitattributes-baseline"; the rest of the file (repository
+# specific attributes) is left untouched. Backlog.md files may end with a blank line.
+lines = '''
+.backlog/** whitespace=-blank-at-eof
+'''
+exclude = []
+
+[[rules]]
 id = "branch-strategy"
 type = "branch_strategy"
 # Branches are repository settings: violations are reported, not fixed.

@@ -3,9 +3,10 @@ id: TASK-15
 title: >-
   Új gitattributes-baseline szabály: minden repóban .gitattributes a .backlog/**
   whitespace=-blank-at-eof sorral
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-05T22:54:00Z'
+updated_date: '2026-11-05T23:11:00Z'
 labels: []
 dependencies: []
 references:
@@ -73,15 +74,33 @@ A `github-manager.toml`-ban egy új `required_lines` szabály biztosítja, hogy 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A github-manager.toml-ban van egy gitattributes-baseline szabály: type = "required_lines", path = ".gitattributes", lines egyetlen sora ".backlog/** whitespace=-blank-at-eof", exclude = []
-- [ ] #2 Egy .gitattributes nélküli repón a check "fix  gitattributes-baseline  .gitattributes: managed block is missing" findingot ad, és a tervezett fájl pontosan ez a három sor: "# >>> github-manager: gitattributes-baseline", ".backlog/** whitespace=-blank-at-eof", "# <<< github-manager: gitattributes-baseline"
-- [ ] #3 Meglévő .gitattributes esetén a fájl korábbi sorai megmaradnak, a blokk egy üres sor után a végére kerül
-- [ ] #4 uv run github-manager repos hiba nélkül betölti a configot
+- [x] #1 A github-manager.toml-ban van egy gitattributes-baseline szabály: type = "required_lines", path = ".gitattributes", lines egyetlen sora ".backlog/** whitespace=-blank-at-eof", exclude = []
+- [x] #2 Egy .gitattributes nélküli repón a check "fix  gitattributes-baseline  .gitattributes: managed block is missing" findingot ad, és a tervezett fájl pontosan ez a három sor: "# >>> github-manager: gitattributes-baseline", ".backlog/** whitespace=-blank-at-eof", "# <<< github-manager: gitattributes-baseline"
+- [x] #3 Meglévő .gitattributes esetén a fájl korábbi sorai megmaradnak, a blokk egy üres sor után a végére kerül
+- [x] #4 uv run github-manager repos hiba nélkül betölti a configot
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . és task verify sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff csak a github-manager.toml-t érinti, és nem tartalmaz kapcsolódó változáson kívüli módosítást
+- [x] #1 uv run ruff format -q . és task verify sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff csak a github-manager.toml-t érinti, és nem tartalmaz kapcsolódó változáson kívüli módosítást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-15-uj-gitattributes-baseline-szabaly-minden-repoban.
+
+Validation: `uv run github-manager repos` exit 0; read-only `check -r tyutyutyu/github-manager --diff` reports `fix gitattributes-baseline .gitattributes: managed block is missing` and plans the exact 3-line file (marker, `.backlog/** whitespace=-blank-at-eof`, marker); applying the loaded rule to an in-memory existing .gitattributes kept prior lines and appended the block after one blank line; `ruff format --check .` and `task verify` green. The Backlog task file change is workflow lifecycle bookkeeping, not implementation.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the `gitattributes-baseline` `required_lines` rule to github-manager.toml (after `gitignore-baseline`): path `.gitattributes`, single line `.backlog/** whitespace=-blank-at-eof`, `exclude = []`, with an English comment. `required_lines` was chosen over `file_sync` so repository-specific attributes are preserved. No src/ or test changes.
+
+Verification: `github-manager repos` loads the config; live read-only `check --diff` on tyutyutyu/github-manager shows the missing-block finding and the exact 3-line planned file; in-memory apply on an existing file preserves prior lines and appends the block after a blank line; `ruff format --check` and `task verify` (lint, ty, deptry, tests, audit, build) pass.
+
+Impact: the next `fix` run adds `.gitattributes` to every in-scope repo's compliance PR, including repos without `.backlog/` (intended, harmless).
+<!-- SECTION:FINAL_SUMMARY:END -->
