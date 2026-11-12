@@ -24,4 +24,8 @@ jobs:
         with:
           enable-cache: true
       - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      # Runs before task verify, in a fresh environment, inside the required verify job.
+      # Keep these uv options identical to the "Apply rules" step in enforce.yml.
+      - name: Smoke-test the enforce start command
+        run: uv run --locked github-manager --help
       - run: task verify
