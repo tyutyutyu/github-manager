@@ -5,8 +5,6 @@
 
 owners = ["tyutyutyu", "tyutyutyu-org"]
 exclude = [
-    "tyutyutyu-org/tyutyutyu-coding-agent",
-    "tyutyutyu-org/update-notifier",
     "tyutyutyu/apple__site-finder",
     "tyutyutyu/bedrock-server-map",
     "tyutyutyu/docker-image-stats",
@@ -30,9 +28,6 @@ exclude = [
     "tyutyutyu/video-converter-cluster",
     "tyutyutyu/yt-dlp-meta",
     "tyutyutyu/zenfocus",
-    "tyutyutyu/zenget",
-    "tyutyutyu/zenget-backlog",
-    "tyutyutyu/zenget-registry",
 ]
 include_forks = false
 
