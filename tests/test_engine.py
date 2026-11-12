@@ -46,6 +46,7 @@ VERIFY_RULE = RepoRuleset.from_options({"id": "dr", "required_workflow_check": "
 VERIFY_PATH = ".github/workflows/verify.yml"
 VERIFY_WORKFLOW = "on: pull_request\njobs:\n  verify:\n    runs-on: ubuntu-latest\n"
 UBUNTU_WORKFLOW = "jobs:\n  test:\n    runs-on: ubuntu-latest\n"
+STAGING = f"{CONFIG.branch}-staging"
 
 
 def repo_named(api, name):
@@ -134,12 +135,21 @@ def test_fix_lifecycle(fake_github) -> None:
     # The default branch moves on: the branch is rebuilt on top of it.
     fake_github.repos[name].commits["base2"] = ("base", {".gitignore": "build/\n"})
     fake_github.repos[name].branches["develop"] = "base2"
+    number = fake_github.find_open_pr(name, CONFIG.branch).number
     third = process_repo(fake_github, CONFIG, repo, fix=True)
     assert third.outcome is Outcome.PR_UPDATED
+    assert fake_github.find_open_pr(name, CONFIG.branch).number == number
+    assert not [call for call in fake_github.calls if call.startswith("auto-close")]
     assert (
         fake_github.files_at(name, CONFIG.branch)[".gitignore"]
         == "build/\n\n# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"
     )
+    assert fake_github.compare(name, "base2", fake_github.branch_sha(name, CONFIG.branch)) == (
+        1,
+        0,
+        {".gitignore"},
+    )
+    assert STAGING not in fake_github.repos[name].branches
 
     # Someone fixes the default branch by hand: the pull request becomes obsolete.
     fake_github.repos[name].commits["base3"] = (
@@ -158,6 +168,85 @@ def test_stale_branch_without_pull_request_is_reused(fake_github) -> None:
     fake_github.repos[name].branches[CONFIG.branch] = "base"
     report = process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=True)
     assert report.outcome is Outcome.PR_CREATED
+
+
+def test_new_branch_is_committed_on_staging_then_moved(fake_github) -> None:
+    name = fake_github.add_repo("app", {})
+    report = process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=True)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert [call for call in fake_github.calls if not call.startswith("read")] == [
+        f"reset {STAGING}",
+        "commit ['.gitignore']",
+        f"reset {CONFIG.branch}",
+        f"delete {STAGING}",
+        "create pr",
+    ]
+    assert STAGING not in fake_github.repos[name].branches
+
+
+def test_staging_branch_left_by_an_interrupted_run_is_reused(fake_github) -> None:
+    name = fake_github.add_repo("app", {})
+    fake_github.repos[name].commits["old"] = ("base", {"junk": "x"})
+    fake_github.repos[name].branches[STAGING] = "old"
+
+    report = process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=True)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert set(fake_github.files_at(name, CONFIG.branch)) == {".gitignore"}
+    assert STAGING not in fake_github.repos[name].branches
+
+
+@pytest.mark.parametrize("failing", ["commit_files", "reset_branch"])
+def test_failed_rebuild_deletes_staging_and_reports_the_error(
+    fake_github, monkeypatch, failing
+) -> None:
+    name = fake_github.add_repo("app", {})
+    original = getattr(fake_github, failing)
+
+    def fail(repo, branch, *args, **kwargs):
+        if failing == "commit_files" or branch == CONFIG.branch:
+            raise GitHubError(f"{failing} broke", 500)
+        return original(repo, branch, *args, **kwargs)
+
+    monkeypatch.setattr(fake_github, failing, fail)
+    report = process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=True)
+
+    assert report.outcome is Outcome.ERROR
+    assert report.detail == f"{failing} broke"
+    assert f"delete {STAGING}" in fake_github.calls
+    assert STAGING not in fake_github.repos[name].branches
+
+
+def test_failed_staging_cleanup_does_not_hide_the_original_error(fake_github, monkeypatch) -> None:
+    fake_github.add_repo("app", {})
+
+    def fail_commit(*args, **kwargs):
+        raise GitHubError("commit broke", 500)
+
+    def fail_delete(*args, **kwargs):
+        raise GitHubError("delete broke", 500)
+
+    monkeypatch.setattr(fake_github, "commit_files", fail_commit)
+    monkeypatch.setattr(fake_github, "delete_branch", fail_delete)
+    report = process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=True)
+
+    assert report.outcome is Outcome.ERROR
+    assert report.detail == "commit broke"
+
+
+def test_fake_github_closes_pull_request_whose_head_is_reset_to_the_base(fake_github) -> None:
+    name = fake_github.add_repo("app", {})
+    fake_github.repos[name].commits["c0"] = ("base", {"a": "1"})
+    fake_github.repos[name].branches[CONFIG.branch] = "c0"
+    fake_github.create_pr(name, "main", CONFIG.branch, "t", "b")
+
+    fake_github.reset_branch(name, CONFIG.branch, "c0", exists=True)
+    assert fake_github.find_open_pr(name, CONFIG.branch) is not None
+
+    fake_github.reset_branch(name, CONFIG.branch, "base", exists=True)
+    assert fake_github.find_open_pr(name, CONFIG.branch) is None
+    assert fake_github.calls[-1] == "auto-close pr 1"
 
 
 def test_pull_request_body_lists_manual_findings(fake_github) -> None:

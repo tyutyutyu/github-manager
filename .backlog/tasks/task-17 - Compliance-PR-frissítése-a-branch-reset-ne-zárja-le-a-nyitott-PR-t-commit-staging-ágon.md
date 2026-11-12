@@ -3,9 +3,10 @@ id: TASK-17
 title: >-
   Compliance PR frissítése: a branch-reset ne zárja le a nyitott PR-t (commit
   staging ágon)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:16:00Z'
+updated_date: '2026-11-12T23:39:00Z'
 labels: []
 dependencies: []
 references:
@@ -79,17 +80,31 @@ A meglévő nyitott compliance PR nyitva marad (ugyanazzal a PR-számmal), amiko
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Nyitott compliance PR mellett, a default ág elmozdulása után a `fix` ugyanazt a PR-t frissíti: a PR nyitva marad, a száma nem változik, az eredmény `pull request updated`
-- [ ] #2 A compliance ág a futás után pontosan egy commit a default ág csúcsán, a szabályok módosításaival, és a commit továbbra is a `commit_files` (aláírt GraphQL commit) útján készül
-- [ ] #3 Sikeres futás után nem marad `<branch>-staging` ág; egy korábbi megszakadt futásból maradt staging ág mellett a futás sikeres
-- [ ] #4 Ha a commit vagy az ág áthelyezése hibázik, a staging ág törlődik, és a repó `error` eredményt kap az eredeti hibaüzenettel
-- [ ] #5 A `FakeGitHub` lezárja a nyitott PR-t, ha a head ága a default ág csúcsára kerül, és ezt a viselkedést teszt rögzíti
-- [ ] #6 A README megemlíti az újraépítéshez használt átmeneti staging ágat
+- [x] #1 Nyitott compliance PR mellett, a default ág elmozdulása után a `fix` ugyanazt a PR-t frissíti: a PR nyitva marad, a száma nem változik, az eredmény `pull request updated`
+- [x] #2 A compliance ág a futás után pontosan egy commit a default ág csúcsán, a szabályok módosításaival, és a commit továbbra is a `commit_files` (aláírt GraphQL commit) útján készül
+- [x] #3 Sikeres futás után nem marad `<branch>-staging` ág; egy korábbi megszakadt futásból maradt staging ág mellett a futás sikeres
+- [x] #4 Ha a commit vagy az ág áthelyezése hibázik, a staging ág törlődik, és a repó `error` eredményt kap az eredeti hibaüzenettel
+- [x] #5 A `FakeGitHub` lezárja a nyitott PR-t, ha a head ága a default ág csúcsára kerül, és ezt a viselkedést teszt rögzíti
+- [x] #6 A README megemlíti az újraépítéshez használt átmeneti staging ágat
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-17-compliance-pr-frissitese-a-branch-reset-ne-zarja.
+
+Finalization check (2026-11-13): the plan was followed. The cleanup uses `except BaseException` + re-raise (with a suppressed GitHubError on delete) instead of `try/finally`; the behavior is equivalent and the original error is preserved. Validation: `uv run pytest tests/test_engine.py --no-cov` 65 passed; `ruff format --check` clean; `task verify` exit 0 (485 passed, 99.40% coverage, lint/ty/deptry/audit/build green). The pre-existing `test_repository_config_file_is_valid` (tests/test_config.py) loads the real config, but it is unchanged by this task and out of scope.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The stale compliance branch is now rebuilt via a temporary `<branch>-staging` branch (`engine._rebuild_branch`): staging is reset to the default branch tip (reused if left over), the signed GraphQL `commit_files` commit is made there, the compliance branch is force-moved onto that commit in one step, and staging is always deleted (cleanup errors do not mask the original error). The compliance branch never equals the base, so GitHub no longer auto-closes the open PR; it keeps its number and the outcome is `pull request updated`. `FakeGitHub.reset_branch` now auto-closes open PRs whose head is reset to the default branch tip, and regression tests cover the lifecycle, call order, leftover staging, failure cleanup and the fake behavior. README mentions the staging branch. Verification: engine tests 65 passed, `task verify` green (485 tests, 99.40% coverage). Follow-up (manual, read-only, after rollout): confirm with `gh pr view` that the first `pull request updated` PR stayed open with the same number. Risk: pushing the staging branch may trigger unfiltered push workflows once per rebuild (accepted).
+<!-- SECTION:FINAL_SUMMARY:END -->

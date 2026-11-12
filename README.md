@@ -9,7 +9,8 @@ Validates the GitHub repositories of several owners (users and organizations, li
   `github-manager/compliance` branch, as a single verified commit, and applies
   repository settings directly.
 - Idempotent: an up-to-date pull request is left alone, a stale one is rebuilt on the
-  current default branch, and an obsolete one (repo fixed by hand) is closed.
+  current default branch, and an obsolete one (repo fixed by hand) is closed. The rebuild
+  briefly uses a `<branch>-staging` branch, so the open pull request keeps its number.
 - Archived repositories and forks are skipped; anything else can be excluded globally or
   per rule with shell globs (`exclude = ["old-*"]`).
 - Files go through the GitHub REST/GraphQL API (standard library); repository settings
