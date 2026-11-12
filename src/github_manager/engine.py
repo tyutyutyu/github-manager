@@ -3,6 +3,7 @@
 Setting and ruleset fixes are not files: they are applied to the repository directly.
 """
 
+import contextlib
 import difflib
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -46,6 +47,10 @@ CLEAN_STATUS = "clean status"
 VERIFY_NOT_REQUIRED = "not enabled: verify is not required"
 # Only this required workflow check makes a repository eligible for auto-merge.
 VERIFY_CHECK = "verify"
+# The commit is made on `<branch>-staging`, then the branch is moved onto it in one step: a pull
+# request whose head equals the base for a moment is closed by GitHub. A hyphen, not a slash,
+# because a ref cannot be both `a/b` and `a/b/c`.
+STAGING_SUFFIX = "-staging"
 
 
 class Outcome(StrEnum):
@@ -371,15 +376,41 @@ def _sync_pull_request(
         api.update_pr(name, pull.number, config.pr_title, body)
         return Outcome.PR_UP_TO_DATE, pull.url, pull
 
-    api.reset_branch(name, branch, base_sha, exists=branch_sha is not None)
     file_findings = [finding for finding in report.findings if not finding.setting]
     message = f"{config.commit_message}\n\n" + "\n".join(_finding_lines(file_findings))
-    api.commit_files(name, branch, base_sha, message, changes)
+    _rebuild_branch(api, name, branch, branch_sha, base_sha, message, changes)
     if pull is not None:
         api.update_pr(name, pull.number, config.pr_title, body)
         return Outcome.PR_UPDATED, pull.url, pull
     pull = api.create_pr(name, repo.default_branch, branch, config.pr_title, body)
     return Outcome.PR_CREATED, pull.url, pull
+
+
+def _rebuild_branch(
+    api: GitHubApi,
+    repo: str,
+    branch: str,
+    branch_sha: str | None,
+    base_sha: str,
+    message: str,
+    changes: dict[str, str],
+) -> None:
+    """Point `branch` at one new commit on top of base, without it ever equalling base.
+
+    The signed commit needs an existing branch, so it is made on a temporary staging branch
+    (reused when an interrupted run left it behind), which is always deleted afterwards.
+    """
+    staging = f"{branch}{STAGING_SUFFIX}"
+    try:
+        api.reset_branch(repo, staging, base_sha, exists=api.branch_sha(repo, staging) is not None)
+        oid = api.commit_files(repo, staging, base_sha, message, changes)
+        api.reset_branch(repo, branch, oid, exists=branch_sha is not None)
+    except BaseException:
+        # The original error matters; a failed cleanup must not hide it.
+        with contextlib.suppress(GitHubError):
+            api.delete_branch(repo, staging)
+        raise
+    api.delete_branch(repo, staging)
 
 
 def _branch_matches(

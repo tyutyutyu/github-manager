@@ -137,8 +137,16 @@ class FakeGitHub:
 
     def reset_branch(self, repo: str, branch: str, sha: str, *, exists: bool) -> None:
         assert (branch in self.repos[repo].branches) == exists
+        state = self.repos[repo]
         self.calls.append(f"reset {branch}")
-        self.repos[repo].branches[branch] = sha
+        state.branches[branch] = sha
+        # Like GitHub: an open pull request whose head has no commits over the base is closed.
+        if sha != state.branches.get(state.info.default_branch):
+            return
+        for number, (head, body, is_open) in list(self.pulls[repo].items()):
+            if head == branch and is_open:
+                self.pulls[repo][number] = (head, body, False)
+                self.calls.append(f"auto-close pr {number}")
 
     def delete_branch(self, repo: str, branch: str) -> None:
         self.calls.append(f"delete {branch}")
