@@ -1,9 +1,10 @@
 ---
 id: TASK-22
 title: A rules.py szétbontása rules/ csomaggá (viselkedésváltozás nélkül)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:32:00Z'
+updated_date: '2026-11-13T18:32:00Z'
 labels: []
 dependencies: []
 references:
@@ -76,16 +77,40 @@ A szabályok egy `src/github_manager/rules/` csomagban, tématerületenkénti mo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `src/github_manager/rules.py` megszűnt; helyette a `src/github_manager/rules/` csomag tartalmazza a szabályokat tématerületenkénti modulokban
-- [ ] #2 A `github_manager.rules`-ból továbbra is importálható: `Workspace`, `Finding`, `REQUIRED`, `Options`, `Rule`, `NOT_READABLE`, `RULE_TYPES`, `ruleset_matches` és a 10 szabályosztály
-- [ ] #3 A `tests/` könyvtár egyetlen fájlja sem módosult, és minden meglévő teszt zöld
-- [ ] #4 A csomag egyik modulja sem hosszabb 800 sornál
-- [ ] #5 Az osztályok, függvények, konstansok és hibaüzenetek tartalma változatlan: a diff csak áthelyezést és import-igazítást tartalmaz
-- [ ] #6 A `RULE_TYPES` ugyanazt a 10 típusnevet tartalmazza, és a valódi konfiguráció betölthető
+- [x] #1 A `src/github_manager/rules.py` megszűnt; helyette a `src/github_manager/rules/` csomag tartalmazza a szabályokat tématerületenkénti modulokban
+- [x] #2 A `github_manager.rules`-ból továbbra is importálható: `Workspace`, `Finding`, `REQUIRED`, `Options`, `Rule`, `NOT_READABLE`, `RULE_TYPES`, `ruleset_matches` és a 10 szabályosztály
+- [x] #3 A `tests/` könyvtár egyetlen fájlja sem módosult, és minden meglévő teszt zöld
+- [x] #4 A csomag egyik modulja sem hosszabb 800 sornál
+- [x] #5 Az osztályok, függvények, konstansok és hibaüzenetek tartalma változatlan: a diff csak áthelyezést és import-igazítást tartalmaz
+- [x] #6 A `RULE_TYPES` ugyanazt a 10 típusnevet tartalmazza, és a valódi konfiguráció betölthető
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-22-a-rules-py-szetbontasa-rules-csomagga-viselkedes.
+
+Finalization verification (2026-11-13):
+- rules.py deleted (staged); package src/github_manager/rules/ with __init__ (50 lines), base (158), files (142), renovate (113), ruleset (199), settings (198), workflows (544). No module over 800 lines, so no separate workflow_yaml.py was needed.
+- Import graph: base <- files/renovate/settings/workflows <- ruleset (imports _workflow_check_problem from workflows) <- __init__; no cycles.
+- AST comparison against fca5fe4:src/github_manager/rules.py: all 57 top-level definitions and assignments (decorators included) match byte for byte, each exists exactly once; the only addition is __all__ (18 names) in __init__.py. The other differences are per-module imports and module docstrings.
+- git diff --stat fca5fe4 -- tests pyproject.toml config.py engine.py: empty.
+- ruff format --check and task verify: exit 0 (502 tests passed, total coverage 99%).
+- RULE_TYPES: the same 10 type names; uv run github-manager repos exit 0 (32 repositories listed).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Split src/github_manager/rules.py (1336 lines) into the src/github_manager/rules/ package with topic modules: base, files, renovate, settings, workflows and ruleset. __init__.py keeps the original docstring and RULE_TYPES (same order), and re-exports the public names through __all__. The goal is to keep every module under the 800-line limit without changing behavior or import paths.
+
+Verification: an AST comparison shows all 57 original top-level definitions moved byte for byte. tests/, config.py, engine.py and pyproject.toml are unchanged. task verify passed (502 tests, 99% coverage). RULE_TYPES has the same 10 types, and github-manager repos loads the real config.
+
+Risk: this is a large move-only diff. Open branches that touch rules.py will need a rebase.
+<!-- SECTION:FINAL_SUMMARY:END -->
