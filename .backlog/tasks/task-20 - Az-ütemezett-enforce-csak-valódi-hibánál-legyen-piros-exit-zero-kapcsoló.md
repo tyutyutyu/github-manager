@@ -1,9 +1,10 @@
 ---
 id: TASK-20
 title: 'Az ütemezett enforce csak valódi hibánál legyen piros: --exit-zero kapcsoló'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:16:00Z'
+updated_date: '2026-11-13T10:03:00Z'
 labels: []
 dependencies:
   - TASK-16
@@ -67,17 +68,39 @@ Az ütemezett `enforce` job csak hiba (kilépési kód 2) esetén piros; a megma
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `check --exit-zero` és a `fix --exit-zero` 0-val lép ki, ha csak leletek maradtak
-- [ ] #2 `--exit-zero` mellett is 2 a kilépési kód konfigurációs hibánál, API-hibánál és akkor, ha bármely repó `error` eredményű
-- [ ] #3 Kapcsoló nélkül a kilépési kódok változatlanok (0, 1, 2)
-- [ ] #4 GitHub Actions alatt, megmaradó leletek esetén pontosan egy `::warning title=github-manager::` kezdetű sor jelenik meg a stdouton az érintett repók számával; leletek nélkül és Actions-en kívül nem
-- [ ] #5 Az `enforce.yml` indítóparancsa `--exit-zero`-t használ
-- [ ] #6 A README „Exit codes" és „Scheduled run" része leírja a kapcsolót és azt, hogy az ütemezett futásban a piros hibát jelent
+- [x] #1 A `check --exit-zero` és a `fix --exit-zero` 0-val lép ki, ha csak leletek maradtak
+- [x] #2 `--exit-zero` mellett is 2 a kilépési kód konfigurációs hibánál, API-hibánál és akkor, ha bármely repó `error` eredményű
+- [x] #3 Kapcsoló nélkül a kilépési kódok változatlanok (0, 1, 2)
+- [x] #4 GitHub Actions alatt, megmaradó leletek esetén pontosan egy `::warning title=github-manager::` kezdetű sor jelenik meg a stdouton az érintett repók számával; leletek nélkül és Actions-en kívül nem
+- [x] #5 Az `enforce.yml` indítóparancsa `--exit-zero`-t használ
+- [x] #6 A README „Exit codes" és „Scheduled run" része leírja a kapcsolót és azt, hogy az ütemezett futásban a piros hibát jelent
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-20-az-utemezett-enforce-csak-valodi-hibanal-legyen.
+
+Validation: `uv run ruff format -q .` changed nothing; `uv run pytest tests/test_cli.py --no-cov` 28 passed; `task verify` exit 0 (501 passed, coverage 99.41%, audit clean, build ok). Plan followed as written: `--exit-zero` added in the shared check/fix loop of build_parser; EXIT_ERROR branches unchanged and take precedence; `_annotate_unresolved` writes the plain `::warning` line with sys.stdout.write (no rich formatting) when GITHUB_ACTIONS=true and findings remain, independent of the switch. API-error coverage uses `-r nope`, which raises GitHubError in select_repos. cli tests use tmp_path configs only.
+
+Re-verified 2026-11-13: ruff format clean, task verify exit 0 (501 passed, 99.41% coverage, audit clean, build ok).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+check and fix accept --exit-zero: remaining findings then exit with 0, while configuration, API and per-repository errors still exit with 2; without the switch exit codes are unchanged (0/1/2). In GitHub Actions, remaining findings (check: any finding, fix: manual findings) print exactly one plain '::warning title=github-manager::<n> repositories with unresolved findings' line, with or without the switch. enforce.yml now runs github-manager with --exit-zero, so a red scheduled run means an error, not routine findings. README documents the switch in Exit codes and Scheduled run.
+
+Tests: exit-zero with findings (check, fix manual), exit-zero with repository error, config error and API error (check and fix), warning count for check (with and without the switch) and for fix (manual only), no warning without findings or outside Actions.
+
+Verification: ruff format clean, tests/test_cli.py 28 passed, task verify exit 0 (501 passed, 99.41% coverage).
+
+Risk: findings are less visible in a green run; mitigated by the warning annotation and the job summary table. Post-merge check remains: gh workflow run enforce.yml -f mode=check should be green with the warning shown.
+<!-- SECTION:FINAL_SUMMARY:END -->

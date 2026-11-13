@@ -228,6 +228,100 @@ def test_error_in_fix_steps_prints_the_findings(
     assert "    fix     gi  .gitignore: managed block is missing\n" in out
 
 
+VISIBILITY_CONFIG = (
+    'owners = ["owner"]\n[[rules]]\nid = "rv"\ntype = "repo_visibility"\n'
+    'visibility = { owner = "private" }\n'
+)
+WARNING_PREFIX = "::warning title=github-manager::"
+
+
+def test_exit_zero_check_with_findings_exits_ok(fake_github, config_path) -> None:
+    fake_github.add_repo("bad", {})
+    assert run(fake_github, config_path, "check", "--exit-zero") == EXIT_OK
+
+
+def test_exit_zero_fix_with_manual_findings_exits_ok(fake_github, tmp_path) -> None:
+    path = tmp_path / "c.toml"
+    path.write_text(VISIBILITY_CONFIG)
+    fake_github.add_repo("app", {}, settings={"visibility": "public"})
+    assert run(fake_github, path, "fix", "--exit-zero") == EXIT_OK
+
+
+def test_exit_zero_still_exits_with_error_on_repository_error(
+    fake_github, config_path, monkeypatch
+) -> None:
+    fake_github.add_repo("a", {})
+    fake_github.add_repo("b", {})
+    original = fake_github.tree_paths
+
+    def flaky(repo: str, sha: str):
+        if repo == "owner/a":
+            raise GitHubError("rate limited", 403)
+        return original(repo, sha)
+
+    monkeypatch.setattr(fake_github, "tree_paths", flaky)
+    assert run(fake_github, config_path, "check", "--exit-zero") == EXIT_ERROR
+
+
+@pytest.mark.parametrize("command", ["check", "fix"])
+def test_exit_zero_still_exits_with_error_on_config_and_api_errors(
+    fake_github, config_path, tmp_path, command
+) -> None:
+    missing = tmp_path / "missing.toml"
+    assert run(fake_github, missing, command, "--exit-zero") == EXIT_ERROR
+    assert run(fake_github, config_path, command, "--exit-zero", "-r", "nope") == EXIT_ERROR
+
+
+def _warning_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith(WARNING_PREFIX)]
+
+
+@pytest.mark.parametrize("extra", [[], ["--exit-zero"]])
+def test_actions_warning_counts_repositories_with_findings(
+    fake_github, config_path, monkeypatch, capsys, extra
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    fake_github.add_repo("a", {})
+    fake_github.add_repo("b", {})
+    fake_github.add_repo(
+        "ok", {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"}
+    )
+    run(fake_github, config_path, "check", *extra)
+    out = capsys.readouterr().out
+    assert _warning_lines(out) == [f"{WARNING_PREFIX}2 repositories with unresolved findings"]
+    assert f"\n{WARNING_PREFIX}2 repositories with unresolved findings\n" in out
+
+
+def test_actions_warning_in_fix_counts_only_manual_findings(
+    fake_github, tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    path = tmp_path / "c.toml"
+    path.write_text(VISIBILITY_CONFIG)
+    fake_github.add_repo("public", {}, settings={"visibility": "public"})
+    fake_github.add_repo("private", {}, settings={"visibility": "private"})
+    assert run(fake_github, path, "fix", "--exit-zero") == EXIT_OK
+    out = capsys.readouterr().out
+    assert _warning_lines(out) == [f"{WARNING_PREFIX}1 repositories with unresolved findings"]
+
+
+def test_actions_warning_absent_without_findings(
+    fake_github, config_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    fake_github.add_repo(
+        "ok", {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"}
+    )
+    assert run(fake_github, config_path, "check", "--exit-zero") == EXIT_OK
+    assert "::warning" not in capsys.readouterr().out
+
+
+def test_actions_warning_absent_outside_actions(fake_github, config_path, capsys) -> None:
+    fake_github.add_repo("bad", {})
+    assert run(fake_github, config_path, "check", "--exit-zero") == EXIT_OK
+    assert "::warning" not in capsys.readouterr().out
+
+
 def test_default_api_uses_resolved_token(monkeypatch) -> None:
     monkeypatch.setattr(cli, "resolve_token", lambda: "t")
     assert cli._default_api() is not None

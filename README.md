@@ -50,6 +50,10 @@ Authentication: `GH_TOKEN` / `GITHUB_TOKEN`, otherwise the token of the logged-i
 
 Exit codes: `0` compliant (or every finding has a pull request), `1` findings remain
 (`check`), or findings need manual action (`fix`), `2` configuration, API or unexpected error.
+With `--exit-zero` (`check` and `fix`), remaining findings exit with `0` too; errors still
+exit with `2`. In GitHub Actions (`GITHUB_ACTIONS=true`), remaining findings also print one
+`::warning title=github-manager::<n> repositories with unresolved findings` line, with or
+without the switch.
 
 ## Rule types
 
@@ -130,6 +134,10 @@ not required`. `check` never enables it.
 [.github/workflows/enforce.yml](.github/workflows/enforce.yml) runs `fix` daily and can
 be started by hand (`check` or `fix`, optionally one repository). It runs one job per
 owner, and each job reads that owner's token secret (see [Tokens](#tokens)).
+
+The scheduled run passes `--exit-zero`, so a red run means an error (exit code `2`: a
+configuration, API, installation or unexpected error), not remaining findings. Findings
+show up in the job summary table and as a warning annotation on the run page.
 
 ## Tokens
 

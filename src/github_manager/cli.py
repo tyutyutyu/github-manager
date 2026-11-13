@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -79,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
             default=[],
             help="limit to a repository: OWNER/NAME, or NAME if unambiguous (repeatable)",
         )
+        command.add_argument(
+            "--exit-zero",
+            action="store_true",
+            help="exit with 0 when findings remain (errors still exit with 2)",
+        )
     return parser
 
 
@@ -110,10 +116,15 @@ def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_a
 
     _print_summary(console, reports)
     _write_step_summary(reports)
+    unresolved = sum(
+        1 for report in reports if (report.manual_findings if fix else report.findings)
+    )
+    _annotate_unresolved(unresolved)
     if any(report.outcome is Outcome.ERROR for report in reports):
         return EXIT_ERROR
-    unresolved = (report.manual_findings if fix else report.findings for report in reports)
-    return EXIT_FINDINGS if any(unresolved) else EXIT_OK
+    if unresolved and not args.exit_zero:
+        return EXIT_FINDINGS
+    return EXIT_OK
 
 
 def _print_report(console: Console, report: RepoReport, *, show_diff: bool) -> None:
@@ -157,6 +168,15 @@ def _print_summary(console: Console, reports: list[RepoReport]) -> None:
         if counts[outcome]:
             summary.append(f"  {symbol} {counts[outcome]} {outcome}", style=style)
     console.print(summary)
+
+
+def _annotate_unresolved(count: int) -> None:
+    """One plain `::warning` workflow command in GitHub Actions when findings remain; it
+    must start the line and carry no ANSI codes, or Actions does not recognise it."""
+    if count and os.environ.get("GITHUB_ACTIONS") == "true":
+        sys.stdout.write(
+            f"::warning title=github-manager::{count} repositories with unresolved findings\n"
+        )
 
 
 def _write_step_summary(reports: list[RepoReport]) -> None:
