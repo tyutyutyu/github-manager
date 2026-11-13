@@ -4,7 +4,8 @@ Validates the GitHub repositories of several owners (users and organizations, li
 `owners`) against central rules and fixes them through pull requests.
 
 - Rules live in [github-manager.toml](github-manager.toml); the shared Renovate preset in
-  [renovate/default.json](renovate/default.json).
+  [renovate/default.json](renovate/default.json), which waits 3 days after a release
+  before proposing or automerging it (`minimumReleaseAge`).
 - `check` only reports. `fix` opens **one pull request per repository** from the
   `github-manager/compliance` branch, as a single verified commit, and applies
   repository settings directly.
