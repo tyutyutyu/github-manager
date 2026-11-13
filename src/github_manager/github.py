@@ -2,11 +2,14 @@
 
 import base64
 import contextlib
+import http.client
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +19,13 @@ from typing import Any
 
 API_URL = "https://api.github.com"
 TIMEOUT_SECONDS = 30
+MAX_ATTEMPTS = 3
+BACKOFF_SECONDS = 1  # wait after the k-th failed attempt: BACKOFF_SECONDS * 2 ** (k - 1)
+SECONDARY_LIMIT_WAIT_SECONDS = 60
+MAX_RATE_LIMIT_WAIT_SECONDS = 120
+TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
+
+logger = logging.getLogger(__name__)
 # The 403 message of a private repository on the Free plan.
 RULESETS_UPGRADE = "Upgrade to GitHub Pro"
 
@@ -80,13 +90,50 @@ def resolve_token() -> str:
     raise GitHubError("no GitHub token: set GH_TOKEN or log in with `gh auth login`")
 
 
+class _Retry(Exception):
+    """One failed attempt that may be retried after `wait` seconds."""
+
+    def __init__(self, error: GitHubError, reason: str, wait: float) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.reason = reason
+        self.wait = wait
+
+
+def _rate_limit_wait(exc: urllib.error.HTTPError, now: float) -> float | None:
+    """Seconds to wait when the response is a rate limit, otherwise None."""
+    headers = exc.headers
+    retry_after = headers.get("Retry-After") if headers else None
+    exhausted = bool(headers) and headers.get("X-RateLimit-Remaining") == "0"
+    if exc.code != 429 and not (exc.code == 403 and (retry_after is not None or exhausted)):
+        return None
+    if retry_after is not None:
+        with contextlib.suppress(ValueError):
+            return float(int(retry_after.strip()))
+    reset = headers.get("X-RateLimit-Reset") if exhausted else None
+    if reset is not None:
+        with contextlib.suppress(ValueError):
+            return max(1.0, float(reset) - now + 1)
+    return float(SECONDARY_LIMIT_WAIT_SECONDS)
+
+
 class GitHub:
-    def __init__(self, token: str, api_url: str = API_URL, opener: Opener = _default_opener):
+    def __init__(
+        self,
+        token: str,
+        api_url: str = API_URL,
+        opener: Opener = _default_opener,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ):
         if not api_url.startswith("https://"):
             raise GitHubError(f"API URL must use https: {api_url}")
         self._token = token
         self._api_url = api_url.rstrip("/")
         self._open = opener
+        self._sleep = sleep
+        self._clock = clock
 
     # --- transport ---------------------------------------------------------
 
@@ -97,23 +144,67 @@ class GitHub:
         elif not url.startswith(self._api_url + "/"):
             raise GitHubError(f"refusing to call a URL outside {self._api_url}: {url}")
         data = None if body is None else json.dumps(body).encode()
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                return self._attempt(method, url, data, attempt)
+            except _Retry as retry:
+                if attempt == MAX_ATTEMPTS:
+                    raise retry.error from retry.error.__cause__
+                logger.warning(
+                    "%s %s: %s; retrying in %s s (attempt %d of %d failed)",
+                    method,
+                    url,
+                    retry.reason,
+                    retry.wait,
+                    attempt,
+                    MAX_ATTEMPTS,
+                )
+                self._sleep(retry.wait)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _attempt(self, method: str, url: str, data: bytes | None, attempt: int) -> tuple[Any, str]:
+        """Send the request once; raise _Retry when another attempt is allowed."""
         request = urllib.request.Request(url, data=data, method=method)  # noqa: S310
         request.add_header("Authorization", f"Bearer {self._token}")
         request.add_header("Accept", "application/vnd.github+json")
         request.add_header("X-GitHub-Api-Version", "2022-11-28")
         if data is not None:
             request.add_header("Content-Type", "application/json")
+        backoff = BACKOFF_SECONDS * 2 ** (attempt - 1)
         try:
             with self._open(request) as response:
                 payload = response.read()
                 link = response.headers.get("Link", "") or ""
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode(errors="replace")
+            try:
+                detail = exc.read().decode(errors="replace")
+            except OSError, http.client.HTTPException:
+                # The error body itself was cut off; the status is still known.
+                detail = exc.reason
             with contextlib.suppress(json.JSONDecodeError, AttributeError):
                 detail = json.loads(detail).get("message", detail)
-            raise GitHubError(f"{method} {url}: HTTP {exc.code}: {detail}", exc.code) from exc
-        except urllib.error.URLError as exc:
-            raise GitHubError(f"{method} {url}: {exc.reason}") from exc
+            message = f"{method} {url}: HTTP {exc.code}: {detail}"
+            wait = _rate_limit_wait(exc, self._clock())
+            if wait is not None:
+                if wait > MAX_RATE_LIMIT_WAIT_SECONDS:
+                    raise GitHubError(
+                        f"{message} (rate limited; resets in {wait:.0f} s)", exc.code
+                    ) from exc
+                error = GitHubError(message, exc.code)
+                error.__cause__ = exc
+                raise _Retry(error, f"HTTP {exc.code} (rate limited)", wait) from exc
+            error = GitHubError(message, exc.code)
+            if exc.code in TRANSIENT_STATUSES and method == "GET":
+                error.__cause__ = exc
+                raise _Retry(error, f"HTTP {exc.code}", backoff) from exc
+            raise error from exc
+        except (OSError, http.client.HTTPException) as exc:
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            error = GitHubError(f"{method} {url}: {reason}")
+            if method == "GET":
+                error.__cause__ = exc
+                raise _Retry(error, str(reason) or type(exc).__name__, backoff) from exc
+            raise error from exc
         return (json.loads(payload) if payload else None), link
 
     def call(self, method: str, path: str, body: Any = None) -> Any:
