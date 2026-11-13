@@ -1,9 +1,10 @@
 ---
 id: TASK-26
 title: ADR-ek a meglévő fő tervezési döntésekről
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:33:00Z'
+updated_date: '2026-11-13T20:26:00Z'
 labels: []
 dependencies: []
 references:
@@ -66,14 +67,28 @@ A hét meglévő tervezési döntés elfogadott ADR-ként, indoklással visszake
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A Backlogban hét új decision van `accepted` státusszal, a leírásban felsorolt hét döntésre
-- [ ] #2 Mindegyikhez tartozik egy dokumentum az `adr` útvonalon Context, Decision, Consequences és Sources szakasszal, amely megnevezi a decision azonosítóját
-- [ ] #3 A Sources szakaszok létező fájlokra, szimbólumokra és feladatazonosítókra hivatkoznak, és az állítások megfelelnek a jelenlegi kódnak
-- [ ] #4 A decisionök és dokumentumok a `backlog` CLI-vel készültek; a Backlog markdown fájljai nem lettek közvetlenül szerkesztve, és kód nem módosult
+- [x] #1 A Backlogban hét új decision van `accepted` státusszal, a leírásban felsorolt hét döntésre
+- [x] #2 Mindegyikhez tartozik egy dokumentum az `adr` útvonalon Context, Decision, Consequences és Sources szakasszal, amely megnevezi a decision azonosítóját
+- [x] #3 A Sources szakaszok létező fájlokra, szimbólumokra és feladatazonosítókra hivatkoznak, és az állítások megfelelnek a jelenlegi kódnak
+- [x] #4 A decisionök és dokumentumok a `backlog` CLI-vel készültek; a Backlog markdown fájljai nem lettek közvetlenül szerkesztve, és kód nem módosult
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Minden létrehozott decision és dokumentum vissza lett olvasva a `backlog` CLI-vel
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 Minden létrehozott decision és dokumentum vissza lett olvasva a `backlog` CLI-vel
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-26-adr-ek-a-meglevo-fo-tervezesi-dontesekrol.
+
+Finalization check (2026-11-13): `backlog decision list --plain` shows decision-2..decision-8, all accepted (decision-1 is the pre-existing, out-of-scope HTTP-client ADR from TASK-24). `backlog doc list --plain` / `backlog doc view doc-2..doc-8`: each ADR doc lives under adr, names its decision ID on the first line and has the Context, Decision, Consequences and Sources sections. Every cited symbol was grepped in its stated file (RemoteWorkspace, _evaluate, _fix, setting_changes, ruleset_changes, _sync_pull_request, _rebuild_branch, _branch_matches, STAGING_SUFFIX, PR_UP_TO_DATE, PR_CLOSED, GitHub.commit_files/createCommitOnBranch/expectedHeadOid, update_repo_settings, _apply_ruleset, ruleset_matches, RULESET_PREFIX, RepoRuleset, VERIFY_CHECK, _verify_required, _auto_merge, CLEAN_STATUS, VERIFY_NOT_REQUIRED, requires_workflow_check, RepoVisibility, BranchStrategy, RequiredFiles, DefaultBranchPushOnly, Finding.fixable, load_config). TASK-2/4/10/11/12/13/14 exist. Claims match the current code (staging-branch rebuild, ruleset read-back without retry, auto-merge condition and immediate merge on clean status, fixable=False report-only rules). git status: only the TASK-26 file and the 14 new Backlog files; no code or README change. dev:verify passed (502 tests, 99.42% coverage). Minor wording: doc-8 Sources says the other config tests use tmp_path files, but most use in-memory parse_config data; the Decision section wording is accurate.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Recorded the seven existing design decisions as accepted Backlog ADRs: decision-2..decision-8, each with a matching doc-2..doc-8 under adr (Context, Decision, Consequences, Sources). Topics: Workspace protocol only, one rebuilt single-commit PR per repo from a fixed branch with a staging branch (idempotent), signed commits through GraphQL createCommitOnBranch, direct settings/ruleset writes with read-back and only the 'github-manager: <id>' ruleset managed, auto-merge only where the managed ruleset requires verify, report-only rules for human decisions, and no tests on the real github-manager.toml beyond a load test. Everything was created with the backlog CLI and read back through it. Every cited file, symbol and task ID was checked against the current code. No code or README change; dev:verify passed. Follow-up (optional): doc-8 Sources slightly overstates tmp_path use in tests/test_config.py.
+<!-- SECTION:FINAL_SUMMARY:END -->
