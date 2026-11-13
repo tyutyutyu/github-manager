@@ -3,9 +3,10 @@ id: TASK-21
 title: >-
   github-manager repó: az enforce tokenjeivel futó függőségek ne
   auto-merge-elődjenek; enforce dev-függőségek nélkül
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:16:00Z'
+updated_date: '2026-11-13T15:17:00Z'
 labels: []
 dependencies:
   - TASK-16
@@ -77,16 +78,38 @@ Ami az `enforce` jobban a flotta-tokenekkel fut, az ebben a repóban csak emberi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Az `enforce.yml` indítóparancsa és a `verify.yml` füsttesztje egyaránt `uv run --locked --no-dev`-et használ
-- [ ] #2 A `--no-dev` környezetben a program elindul, és a `dev` csoport csomagjai (pl. `pytest`) nincsenek telepítve
-- [ ] #3 A repó `renovate.json`-ja kikapcsolja az automerge-et a GitHub Actions frissítésekre, valamint a `[project].dependencies` és a `[build-system].requires` függőségeire
-- [ ] #4 A `dev` csoport frissítéseire nem vonatkozik új szabály (továbbra is a közös preset szerint auto-merge-elődnek)
-- [ ] #5 A `renovate.json` `extends` tömbje változatlan, és a `renovate-config-validator` hiba nélkül elfogadja a fájlt
-- [ ] #6 A README leírja, hogy az `enforce` dev-függőségek nélkül fut, és mely frissítések igényelnek kézi merge-et
+- [x] #1 Az `enforce.yml` indítóparancsa és a `verify.yml` füsttesztje egyaránt `uv run --locked --no-dev`-et használ
+- [x] #2 A `--no-dev` környezetben a program elindul, és a `dev` csoport csomagjai (pl. `pytest`) nincsenek telepítve
+- [x] #3 A repó `renovate.json`-ja kikapcsolja az automerge-et a GitHub Actions frissítésekre, valamint a `[project].dependencies` és a `[build-system].requires` függőségeire
+- [x] #4 A `dev` csoport frissítéseire nem vonatkozik új szabály (továbbra is a közös preset szerint auto-merge-elődnek)
+- [x] #5 A `renovate.json` `extends` tömbje változatlan, és a `renovate-config-validator` hiba nélkül elfogadja a fájlt
+- [x] #6 A README leírja, hogy az `enforce` dev-függőségek nélkül fut, és mely frissítések igényelnek kézi merge-et
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-21-github-manager-repo-az-enforce-tokenjeivel-futo.
+
+Validation (2026-11-13): renovate.json is valid JSON; renovate-config-validator accepts it in file and repo mode. Manager and depType names checked in Renovate source (modules/manager/pep621/dep-types.js, modules/manager/github-actions): project.dependencies and build-system.requires are the documented names; the dev group uses the unmatched dependency-groups depType, so it keeps the preset's automerge. In a fresh UV_PROJECT_ENVIRONMENT, `uv run --locked --no-dev github-manager --help` exits 0 and pytest is not importable. ruff format --check and task verify pass (502 tests, 99.41% coverage). Pending manual check after merge: the next runtime/action Renovate PR has no auto-merge, a dev group PR still has it.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The enforce job no longer installs dev tools next to the fleet tokens, and the code it runs is only updated by hand-merged Renovate PRs in this repo.
+
+- enforce.yml "Apply rules" and the verify.yml smoke test now use `uv run --locked --no-dev`; other arguments unchanged.
+- renovate.json: two packageRules (automerge: false) for the github-actions manager and for pep621 project.dependencies / build-system.requires; extends unchanged. The dev group (dependency-groups depType) still auto-merges via the shared preset.
+- README "Scheduled run" explains the --no-dev run and which updates need a manual merge.
+
+Verification: JSON valid; renovate-config-validator passes; fresh --no-dev env starts the CLI (exit 0) without pytest; ruff format check and task verify green (502 tests, 99.41% coverage).
+
+Risks/follow-up: more manual merges in this repo (intended). After merge, check by hand that the next runtime/action Renovate PR is not auto-merged while a dev group PR is.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -139,6 +139,12 @@ The scheduled run passes `--exit-zero`, so a red run means an error (exit code `
 configuration, API, installation or unexpected error), not remaining findings. Findings
 show up in the job summary table and as a warning annotation on the run page.
 
+The job runs with `uv run --locked --no-dev`, so the `dev` dependency group is not
+installed next to the fleet tokens. For the same reason, this repository's
+[renovate.json](renovate.json) turns off auto-merge for updates of the runtime
+dependencies (`[project].dependencies`), the build backend (`[build-system].requires`) and
+the GitHub Actions: those need a manual merge. `dev` group updates still auto-merge.
+
 ## Tokens
 
 A fine-grained personal access token covers a single resource owner, so every entry in
