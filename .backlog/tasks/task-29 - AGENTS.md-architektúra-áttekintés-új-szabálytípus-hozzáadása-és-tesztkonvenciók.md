@@ -3,9 +3,10 @@ id: TASK-29
 title: >-
   AGENTS.md: architektúra-áttekintés, új szabálytípus hozzáadása és
   tesztkonvenciók
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:33:00Z'
+updated_date: '2026-11-13T21:30:00Z'
 labels: []
 dependencies:
   - TASK-22
@@ -70,15 +71,29 @@ Az `AGENTS.md` a Backlog-blokk mellett tömören leírja az architektúrát, az 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Az `AGENTS.md` Backlog-blokkja bájtra változatlan; az új tartalom a `<!-- BACKLOG.MD GUIDELINES END -->` sor után áll, angolul
-- [ ] #2 Van „Architecture" szakasz, amely a tényleges modulokat, az adatfolyamot, a `check` és `fix` különbségét és a háromféle leletet írja le
-- [ ] #3 Van „Adding a rule type" szakasz, amelynek lépései alapján egy új szabálytípus a kód, a regiszter, a tesztek és a README szintjén hozzáadható
-- [ ] #4 Van „Conventions" szakasz a leírásban felsorolt öt konvencióval
-- [ ] #5 Az `AGENTS.md`-ben megnevezett minden fájl és szimbólum létezik a jelenlegi kódban, és a `CLAUDE.md`, a README és a kód nem módosult
+- [x] #1 Az `AGENTS.md` Backlog-blokkja bájtra változatlan; az új tartalom a `<!-- BACKLOG.MD GUIDELINES END -->` sor után áll, angolul
+- [x] #2 Van „Architecture" szakasz, amely a tényleges modulokat, az adatfolyamot, a `check` és `fix` különbségét és a háromféle leletet írja le
+- [x] #3 Van „Adding a rule type" szakasz, amelynek lépései alapján egy új szabálytípus a kód, a regiszter, a tesztek és a README szintjén hozzáadható
+- [x] #4 Van „Conventions" szakasz a leírásban felsorolt öt konvencióval
+- [x] #5 Az `AGENTS.md`-ben megnevezett minden fájl és szimbólum létezik a jelenlegi kódban, és a `CLAUDE.md`, a README és a kód nem módosult
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-29-agents-md-architektura-attekintes-uj-szabalytipu.
+
+Finalization check (2026-11-13): AGENTS.md lines 1-24 byte-identical to HEAD (cmp); git diff adds 41 lines after line 24 only. All named paths exist (ls) and all symbols found with grep in src/tests (cli.main, load_config, select_repos, process_repo, RemoteWorkspace, GitHub, Workspace, Finding, Options, Rule, RULE_TYPES, MemoryWorkspace, FakeGitHub). git diff --stat 32644530 -- CLAUDE.md README.md src tests is empty. ADR pointer kept because backlog decision list shows decision-1..8. Note: the HEAD Backlog block has no GUIDELINES START marker, only the END marker; the block was left untouched. task verify: exit 0, 502 passed, 1 skipped (sandbox), coverage 99.42%.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+AGENTS.md now has three English sections after the Backlog block (left unchanged): Architecture (modules, data flow cli.main -> load_config -> select_repos -> process_repo -> Rule.apply, check vs fix, the three Finding kinds, pointer to Backlog decisions), Adding a rule type (7 steps: frozen kw_only dataclass with type_name, _build via Options, apply via Workspace, RULE_TYPES registration, MemoryWorkspace/FakeGitHub tests, README subsection, config only on owner request) and Conventions (the five existing conventions). Why: the deleted local skill left no versioned guide for agents and new developers. Verification: every named file and symbol checked with ls/grep; CLAUDE.md, README, src and tests unchanged; ruff format and task verify green (502 passed, 1 skipped, 99.42% coverage). Risk: the guide goes stale when the structure changes; it stays short and points to the code.
+<!-- SECTION:FINAL_SUMMARY:END -->
