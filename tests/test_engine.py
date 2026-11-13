@@ -936,7 +936,7 @@ def test_remote_workspace_paths_are_none_when_tree_is_not_listable(fake_github) 
 AUTO_MERGE_CONFIG = Config(
     owners=["owner"], rules=[RULE, SETTINGS_RULE, VERIFY_RULE], auto_merge=True
 )
-CLEAN_STATUS_ERROR = "GraphQL: Pull request is in clean status"
+AUTO_MERGE_ERROR = "GraphQL: Pull request is not in the expected state"
 
 
 def add_auto_merge_repo(fake_github, files=None, **kwargs) -> str:
@@ -1097,16 +1097,51 @@ def test_up_to_date_pull_request_without_auto_merge_gets_it(fake_github) -> None
     assert again.auto_merge == "enabled (squash)"
 
 
-def test_clean_status_merges_the_pull_request_directly(fake_github) -> None:
+def test_successful_auto_merge_does_not_query_the_merge_state(fake_github) -> None:
+    add_auto_merge_repo(fake_github)
+
+    report = run_fix(fake_github)
+
+    assert report.auto_merge == "enabled (squash)"
+    assert "merge state 1" not in fake_github.calls
+
+
+def test_clean_merge_state_merges_the_pull_request_directly(fake_github) -> None:
     name = add_auto_merge_repo(fake_github)
-    fake_github.auto_merge_error = CLEAN_STATUS_ERROR
+    fake_github.auto_merge_error = AUTO_MERGE_ERROR
+    fake_github.merge_states[(name, 1)] = "CLEAN"
 
     report = run_fix(fake_github)
 
     assert report.outcome is Outcome.PR_CREATED
     assert report.auto_merge == "merged (squash)"
-    assert auto_merge_calls(fake_github) == ["enable auto-merge 1", "merge pr 1"]
+    assert auto_merge_calls(fake_github) == ["enable auto-merge 1", "merge state 1", "merge pr 1"]
     assert fake_github.find_open_pr(name, AUTO_MERGE_CONFIG.branch) is None
+
+
+@pytest.mark.parametrize("state", ["BLOCKED", "UNKNOWN"])
+def test_not_clean_merge_state_keeps_the_original_error(fake_github, state) -> None:
+    name = add_auto_merge_repo(fake_github)
+    fake_github.auto_merge_error = "GraphQL: Pull request is in clean status"
+    fake_github.merge_states[(name, 1)] = state
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == "failed: GraphQL: Pull request is in clean status"
+    assert auto_merge_calls(fake_github) == ["enable auto-merge 1", "merge state 1"]
+
+
+def test_merge_state_errors_do_not_fail_the_repository(fake_github) -> None:
+    add_auto_merge_repo(fake_github)
+    fake_github.auto_merge_error = AUTO_MERGE_ERROR
+    fake_github.merge_state_error = "GraphQL: Something went wrong"
+
+    report = run_fix(fake_github)
+
+    assert report.outcome is Outcome.PR_CREATED
+    assert report.auto_merge == "failed: GraphQL: Something went wrong"
+    assert "merge pr 1" not in fake_github.calls
 
 
 def test_auto_merge_errors_do_not_fail_the_repository(fake_github) -> None:
@@ -1124,7 +1159,8 @@ def test_auto_merge_errors_do_not_fail_the_repository(fake_github) -> None:
 
 def test_merge_errors_do_not_fail_the_repository(fake_github) -> None:
     name = add_auto_merge_repo(fake_github)
-    fake_github.auto_merge_error = CLEAN_STATUS_ERROR
+    fake_github.auto_merge_error = AUTO_MERGE_ERROR
+    fake_github.merge_states[(name, 1)] = "CLEAN"
     fake_github.merge_error = "PUT /repos/owner/app/pulls/1/merge: HTTP 405: not mergeable"
 
     report = run_fix(fake_github)

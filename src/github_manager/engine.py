@@ -31,6 +31,7 @@ class GitHubApi(Protocol):
     def create_pr(self, repo: str, base: str, head: str, title: str, body: str) -> PullRequest: ...
     def update_pr(self, repo: str, number: int, title: str, body: str) -> None: ...
     def enable_auto_merge(self, repo: str, pull: PullRequest) -> None: ...
+    def merge_state(self, repo: str, pull: PullRequest) -> str: ...
     def merge_pr(self, repo: str, number: int) -> None: ...
     def close_pr(self, repo: str, number: int, comment: str) -> None: ...
     def repo_settings(self, repo: str) -> dict[str, Any]: ...
@@ -43,8 +44,9 @@ class GitHubApi(Protocol):
     ) -> dict[str, Any]: ...
 
 
-# GitHub refuses to enable auto-merge on a pull request that can be merged right away.
-CLEAN_STATUS = "clean status"
+# The `mergeStateStatus` of a pull request that can be merged right away; GitHub refuses
+# to enable auto-merge on such a pull request.
+MERGEABLE_NOW = "CLEAN"
 VERIFY_NOT_REQUIRED = "not enabled: verify is not required"
 # Only this required workflow check makes a repository eligible for auto-merge.
 VERIFY_CHECK = "verify"
@@ -349,10 +351,10 @@ def _auto_merge(
             return "already enabled"
         try:
             api.enable_auto_merge(name, pull)
-        except GitHubError as exc:
-            if CLEAN_STATUS not in str(exc).lower():
+        except GitHubError:
+            if api.merge_state(name, pull) != MERGEABLE_NOW:
                 raise
-            # The required check has already passed, so merging right away is safe.
+            # Every required condition, the `verify` check included, is met: merge right away.
             api.merge_pr(name, pull.number)
             return "merged (squash)"
         return "enabled (squash)"

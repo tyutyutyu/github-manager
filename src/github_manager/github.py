@@ -26,7 +26,11 @@ MAX_RATE_LIMIT_WAIT_SECONDS = 120
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
 
 logger = logging.getLogger(__name__)
-# The 403 message of a private repository on the Free plan.
+# The 403 message of a private repository on the Free plan, observed in full as
+# "Upgrade to GitHub Pro or make this repository public to enable this feature.".
+# The response carries no structured code (only `message`, `documentation_url` and
+# `status`), so a case-insensitive text match is the only signal. If GitHub rewords it,
+# the repository gets an `error` result with the 403 message instead of being skipped.
 RULESETS_UPGRADE = "Upgrade to GitHub Pro"
 
 COMMIT_MUTATION = """
@@ -42,6 +46,13 @@ mutation($pullRequestId: ID!) {
   }
 }
 """
+
+MERGE_STATE_QUERY = """
+query($id: ID!) {
+  node(id: $id) { ... on PullRequest { mergeStateStatus } }
+}
+"""
+UNKNOWN_MERGE_STATE = "UNKNOWN"
 
 
 class GitHubError(Exception):
@@ -350,9 +361,15 @@ class GitHub:
         self.call("PATCH", f"/repos/{repo}/pulls/{number}", {"state": "closed"})
 
     def enable_auto_merge(self, repo: str, pull: PullRequest) -> None:
-        """Squash auto-merge; GitHub refuses it with a "clean status" error when the pull
-        request can already be merged."""
+        """Squash auto-merge; GitHub refuses it when the pull request can already be merged."""
         self.graphql(AUTO_MERGE_MUTATION, {"pullRequestId": pull.node_id})
+
+    def merge_state(self, repo: str, pull: PullRequest) -> str:
+        """The `mergeStateStatus` of the pull request, `UNKNOWN` when GitHub returns none."""
+        data = self.graphql(MERGE_STATE_QUERY, {"id": pull.node_id})
+        node = data.get("node") if isinstance(data, dict) else None
+        state = node.get("mergeStateStatus") if isinstance(node, dict) else None
+        return state if isinstance(state, str) else UNKNOWN_MERGE_STATE
 
     def merge_pr(self, repo: str, number: int) -> None:
         self.call("PUT", f"/repos/{repo}/pulls/{number}/merge", {"merge_method": "squash"})
@@ -364,7 +381,7 @@ class GitHub:
         try:
             return self.paginate(f"/repos/{repo}/rulesets?includes_parents=false&per_page=100")
         except GitHubError as exc:
-            if exc.status == 403 and RULESETS_UPGRADE in str(exc):
+            if exc.status == 403 and RULESETS_UPGRADE.lower() in str(exc).lower():
                 return None
             raise
 

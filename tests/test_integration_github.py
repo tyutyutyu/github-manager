@@ -5,6 +5,7 @@ Without the variable the test is skipped before any network call.
 """
 
 import os
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from github_manager.config import Config, parse_config
-from github_manager.engine import STAGING_SUFFIX, Outcome, process_repo
-from github_manager.github import GitHub, GitHubError, Repo, resolve_token
+from github_manager.engine import MERGEABLE_NOW, STAGING_SUFFIX, Outcome, process_repo
+from github_manager.github import GitHub, GitHubError, PullRequest, Repo, resolve_token
 
 pytestmark = pytest.mark.integration
 
@@ -25,6 +26,9 @@ NONCOMPLIANT_CONTENT = "not managed yet\n"
 TOUCH_PATH = ".github-manager-sandbox-touch"
 # GitHub answers a missing ref with 404 or 422.
 MISSING_REF = (404, 422)
+# GitHub computes the merge state asynchronously after the pull request is opened.
+MERGE_STATE_ATTEMPTS = 5
+MERGE_STATE_PAUSE_SECONDS = 2
 
 
 def _sandbox_repo() -> str:
@@ -102,6 +106,18 @@ def sandbox() -> Iterator[tuple[GitHub, Repo]]:
         _clean_up(api, repo.full_name)
 
 
+def _wait_for_merge_state(api: GitHub, repo: str, pull: PullRequest) -> list[str]:
+    """Poll the merge state until it is `CLEAN` or the attempts run out; all observed states."""
+    states: list[str] = []
+    for attempt in range(MERGE_STATE_ATTEMPTS):
+        if attempt:
+            time.sleep(MERGE_STATE_PAUSE_SECONDS)
+        states.append(api.merge_state(repo, pull))
+        if states[-1] == MERGEABLE_NOW:
+            break
+    return states
+
+
 def test_compliance_pull_request_lifecycle(sandbox: tuple[GitHub, Repo]) -> None:
     api, repo = sandbox
     config = _config(repo.full_name.split("/", 1)[0])
@@ -117,6 +133,14 @@ def test_compliance_pull_request_lifecycle(sandbox: tuple[GitHub, Repo]) -> None
     assert report.outcome is Outcome.PR_CREATED, report.detail
     pull = api.find_open_pr(repo.full_name, BRANCH)
     assert pull is not None
+
+    # b2. without required checks the pull request is mergeable now, so auto-merge is refused
+    states = _wait_for_merge_state(api, repo.full_name, pull)
+    print(f"observed merge states: {states}")
+    assert states[-1] == MERGEABLE_NOW, states
+    with pytest.raises(GitHubError) as refused:
+        api.enable_auto_merge(repo.full_name, pull)
+    print(f"auto-merge refused with: {refused.value}")
 
     # c. the default branch moves on with an unrelated commit
     _commit_to_default(api, repo, {TOUCH_PATH: f"{stamp}\n"}, "test: move integration sandbox")
