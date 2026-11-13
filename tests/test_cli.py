@@ -187,6 +187,47 @@ def test_repository_errors_do_not_stop_the_run(fake_github, config_path, monkeyp
     assert run(fake_github, config_path, "check") == EXIT_ERROR
 
 
+def test_unexpected_error_does_not_stop_the_run(
+    fake_github, config_path, tmp_path, monkeypatch, capsys
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    fake_github.add_repo("a", {})
+    fake_github.add_repo("b", {})
+    original = fake_github.tree_paths
+
+    def broken(repo: str, sha: str):
+        if repo == "owner/a":
+            raise KeyError("sha")
+        return original(repo, sha)
+
+    monkeypatch.setattr(fake_github, "tree_paths", broken)
+    assert run(fake_github, config_path, "check") == EXIT_ERROR
+    captured = capsys.readouterr()
+    assert "✖ owner/a  error  unexpected KeyError: 'sha'\n" in captured.out
+    assert "✖ owner/b  needs fix\n" in captured.out
+    assert captured.out.endswith("\n2 repositories  ✖ 1 needs fix  ✖ 1 error\n")
+    assert "Traceback (most recent call last)" in captured.err
+    table = summary.read_text()
+    assert "| owner/a | error unexpected KeyError: 'sha' |" in table
+    assert "| owner/b | needs fix |" in table
+
+
+def test_error_in_fix_steps_prints_the_findings(
+    fake_github, config_path, monkeypatch, capsys
+) -> None:
+    fake_github.add_repo("app", {})
+
+    def fail(*args, **kwargs):
+        raise GitHubError("commit broke", 500)
+
+    monkeypatch.setattr(fake_github, "commit_files", fail)
+    assert run(fake_github, config_path, "fix") == EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "✖ owner/app  error  commit broke\n" in out
+    assert "    fix     gi  .gitignore: managed block is missing\n" in out
+
+
 def test_default_api_uses_resolved_token(monkeypatch) -> None:
     monkeypatch.setattr(cli, "resolve_token", lambda: "t")
     assert cli._default_api() is not None

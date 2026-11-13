@@ -273,6 +273,58 @@ def test_api_errors_are_reported_per_repository(fake_github) -> None:
     assert report.detail == "boom"
 
 
+def test_unexpected_error_fails_only_the_repository_with_a_traceback(fake_github, capsys) -> None:
+    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
+    workflow = "jobs:\n  b:\n    runs-on: !foo bar\n"
+    fake_github.add_repo(
+        "app", {".github/workflows/ci.yml": workflow}, settings={"visibility": "private"}
+    )
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
+
+    assert report.outcome is Outcome.ERROR
+    assert report.detail.startswith("unexpected ConstructorError: ")
+    assert report.findings == []
+    err = capsys.readouterr().err
+    assert "Traceback (most recent call last)" in err
+    assert "ConstructorError" in err
+
+
+@pytest.mark.parametrize(
+    ("error", "detail"),
+    [
+        (GitHubError("commit broke", 500), "commit broke"),
+        (KeyError("oid"), "unexpected KeyError: 'oid'"),
+    ],
+)
+def test_error_in_fix_steps_keeps_the_evaluated_findings_and_diffs(
+    fake_github, monkeypatch, error, detail
+) -> None:
+    fake_github.add_repo("app", {".gitignore": "dist/\n"})
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(fake_github, "commit_files", fail)
+    report = process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=True)
+
+    assert report.outcome is Outcome.ERROR
+    assert report.detail == detail
+    assert [finding.rule_id for finding in report.findings] == ["gi"]
+    assert "+.env" in report.diffs[0]
+
+
+def test_keyboard_interrupt_stops_the_run(fake_github, monkeypatch) -> None:
+    fake_github.add_repo("app", {})
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(fake_github, "tree_paths", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        process_repo(fake_github, CONFIG, repo_named(fake_github, "app"), fix=False)
+
+
 def test_branch_strategy_sees_repository_branches(fake_github) -> None:
     rule = BranchStrategy.from_options({"id": "bs"}, Path())
     config = Config(owners=["owner"], rules=[rule])

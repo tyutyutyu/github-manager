@@ -5,7 +5,8 @@ Setting and ruleset fixes are not files: they are applied to the repository dire
 
 import contextlib
 import difflib
-from dataclasses import dataclass, field
+import traceback
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from fnmatch import fnmatchcase
 from typing import Any, Protocol
@@ -248,14 +249,45 @@ def _excluded(repo: Repo, patterns: list[str]) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class _Evaluation:
+    """The rules applied to one repository: the report, plus what the fix steps need."""
+
+    report: RepoReport
+    workspace: RemoteWorkspace
+    base_sha: str
+    changes: dict[str, str]
+
+
 def process_repo(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoReport:
+    """Report of one repository; any error only fails this repository.
+
+    An error in the fix steps keeps the findings and diffs of the evaluation.
+    """
     try:
-        return _process(api, config, repo, fix=fix)
-    except GitHubError as exc:
-        return RepoReport(repo.full_name, Outcome.ERROR, detail=str(exc))
+        evaluation = _evaluate(api, config, repo)
+    except Exception as exc:
+        return RepoReport(repo.full_name, Outcome.ERROR, detail=_error_detail(exc))
+    if isinstance(evaluation, RepoReport):
+        return evaluation
+    if not fix:
+        return evaluation.report
+    try:
+        return _fix(api, config, repo, evaluation)
+    except Exception as exc:
+        return replace(evaluation.report, outcome=Outcome.ERROR, detail=_error_detail(exc))
 
 
-def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoReport:
+def _error_detail(exc: Exception) -> str:
+    """The report detail of a failed repository; an unexpected error also gets a traceback."""
+    if isinstance(exc, GitHubError):
+        return str(exc)
+    traceback.print_exception(exc)
+    return f"unexpected {type(exc).__name__}: {exc}"
+
+
+def _evaluate(api: GitHubApi, config: Config, repo: Repo) -> _Evaluation | RepoReport:
+    """Apply the rules; a repository without commits is skipped with a ready report."""
     base_sha = api.branch_sha(repo.full_name, repo.default_branch)
     if base_sha is None:
         return RepoReport(repo.full_name, Outcome.SKIPPED, detail="empty repository")
@@ -272,20 +304,26 @@ def _process(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoRe
         findings=findings,
         diffs=[workspace.diff(path) for path in changes],
     )
-    if fix:
-        report.outcome, report.detail, pull = _sync_pull_request(
-            api, config, repo, base_sha, report, changes
-        )
-        settings = workspace.setting_changes()
-        if settings:
-            api.update_repo_settings(repo.full_name, settings)
-        rulesets = workspace.ruleset_changes()
-        for change in rulesets:
-            _apply_ruleset(api, repo.full_name, change)
-        if (settings or rulesets) and report.outcome is Outcome.NEEDS_FIX:
-            report.outcome = Outcome.SETTINGS_UPDATED
-        if config.auto_merge and pull is not None:
-            report.auto_merge = _auto_merge(api, config, repo, workspace, report, pull)
+    return _Evaluation(report, workspace, base_sha, changes)
+
+
+def _fix(api: GitHubApi, config: Config, repo: Repo, evaluation: _Evaluation) -> RepoReport:
+    """Pull request, settings, rulesets and auto-merge; returns a new report."""
+    workspace = evaluation.workspace
+    outcome, detail, pull = _sync_pull_request(
+        api, config, repo, evaluation.base_sha, evaluation.report, evaluation.changes
+    )
+    settings = workspace.setting_changes()
+    if settings:
+        api.update_repo_settings(repo.full_name, settings)
+    rulesets = workspace.ruleset_changes()
+    for change in rulesets:
+        _apply_ruleset(api, repo.full_name, change)
+    if (settings or rulesets) and outcome is Outcome.NEEDS_FIX:
+        outcome = Outcome.SETTINGS_UPDATED
+    report = replace(evaluation.report, outcome=outcome, detail=detail)
+    if config.auto_merge and pull is not None:
+        report = replace(report, auto_merge=_auto_merge(api, config, repo, workspace, report, pull))
     return report
 
 
