@@ -36,6 +36,10 @@ tasks:
     cmds:
       - uv run pytest {{.CLI_ARGS}}
 
+  test-integration:
+    cmds:
+      - uv run pytest -m integration --no-cov {{.CLI_ARGS}}
+
   audit:
     cmds:
       - uv audit --locked --preview-features audit-command
