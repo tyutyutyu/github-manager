@@ -18,6 +18,12 @@
       "automerge": true
     },
     {
+      "description": "Leave the pyproject requires-python constraint alone: it is a project requirement, not a dependency to pin (the interpreter version comes from .python-version)",
+      "matchManagers": ["pep621"],
+      "matchDepTypes": ["requires-python"],
+      "enabled": false
+    },
+    {
       "description": "Do not automerge Python minor version updates",
       "matchDepNames": ["python"],
       "matchUpdateTypes": ["minor"],
