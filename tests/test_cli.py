@@ -123,6 +123,19 @@ def test_errors_are_red_on_a_terminal(fake_github, tmp_path, monkeypatch, capsys
     assert captured.out == ""
 
 
+def test_printed_repositories_are_separated_by_a_blank_line(
+    fake_github, config_path, capsys
+) -> None:
+    fake_github.add_repo("a", {})
+    fake_github.add_repo("b", {})
+
+    assert run(fake_github, config_path, "fix") == EXIT_OK
+    out = capsys.readouterr().out
+    assert out.startswith("✚ owner/a  pull request created")
+    assert "missing\n\n✚ owner/b  pull request created" in out
+    assert "\n\n\n" not in out
+
+
 def test_fix_opens_pull_requests_and_writes_step_summary(
     fake_github, config_path, tmp_path, monkeypatch, capsys
 ) -> None:

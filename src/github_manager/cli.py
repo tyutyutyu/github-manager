@@ -108,11 +108,15 @@ def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_a
 
     fix = args.command == "fix"
     reports = []
+    printed_any = False
     for repo in repos:
         report = process_repo(api, config, repo, fix=fix)
         reports.append(report)
         if report.outcome is not Outcome.COMPLIANT or args.verbose:
+            if printed_any:
+                console.print()
             _print_report(console, report, show_diff=getattr(args, "diff", False))
+            printed_any = True
 
     _print_summary(console, reports)
     _write_step_summary(reports)
