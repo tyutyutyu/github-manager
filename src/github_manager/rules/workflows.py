@@ -3,6 +3,7 @@
 import json
 from collections import Counter
 from dataclasses import dataclass
+from enum import IntEnum
 from fnmatch import fnmatchcase
 from itertools import pairwise
 from pathlib import Path
@@ -95,9 +96,10 @@ class SelfHostedRunners(Rule):
         text = workspace.read(path)
         if text is None:
             return [self._manual(path, "the file is not readable")]
-        jobs, error = _jobs(text)
+        parsed = _jobs(text)
+        jobs = parsed.entries
         if jobs is None:
-            return [self._manual(path, error or "")]
+            return [self._manual(path, parsed.error or "")]
         findings = []
         replacements = []
         # Jobs that share one mapping through an alias reach the same value node.
@@ -142,14 +144,14 @@ class SelfHostedRunners(Rule):
 
     def _verified(self, new_text: str, replacements: list[_Replacement]) -> bool:
         """True when the rewritten file parses and every rewritten job is now allowed."""
-        jobs, _ = _jobs(new_text)
+        jobs = _jobs(new_text).entries
         return jobs is not None and all(
             item.job in jobs and self._job_problem(jobs[item.job]) is None for item in replacements
         )
 
     def _rewritable(self, job: yaml.Node) -> bool:
         """True for a single `ubuntu-*` label or a label set with `self-hosted`."""
-        labels = _labels((_mapping(job) or {}).get("runs-on"))
+        labels = _strings((_mapping(job) or {}).get("runs-on"))
         if labels is None or any("${{" in label for label in labels):
             return False
         folded = frozenset(label.casefold() for label in labels)
@@ -280,10 +282,9 @@ class DefaultBranchPushOnly(Rule):
 
 def _push_only_problem(text: str, branch: str) -> str | None:
     """The first reason the workflow does not run only on pushes to `branch`; None if it does."""
-    try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
-    except yaml.YAMLError as exc:
-        return f"invalid YAML ({getattr(exc, 'problem', None) or 'invalid'})"
+    root, error = _compose(text)
+    if error is not None:
+        return error
     if not isinstance(root, yaml.MappingNode):
         return "invalid YAML (the root is not a mapping)"
     # PyYAML (YAML 1.1) loads the key `on` as True, but the node holds the text.
@@ -306,7 +307,7 @@ def _push_only_problem(text: str, branch: str) -> str | None:
 
 def _shown(node: yaml.Node) -> str:
     """A message rendering of a non-mapping YAML node that never constructs its value."""
-    patterns = _patterns(node)
+    patterns = _strings(node)
     if patterns is not None:
         return json.dumps(patterns[0] if isinstance(node, yaml.ScalarNode) else patterns)
     if isinstance(node, yaml.ScalarNode):
@@ -317,7 +318,7 @@ def _shown(node: yaml.Node) -> str:
 def _push_filter_problem(filters: dict[str, yaml.Node], branch: str) -> str | None:
     if "branches" not in filters:
         return "push has no branches filter (it runs on every branch)"
-    patterns = _patterns(filters["branches"])
+    patterns = _strings(filters["branches"])
     if patterns is None:
         return "push branches cannot be read"
     if patterns != [branch]:
@@ -333,23 +334,23 @@ def _push_filter_problem(filters: dict[str, yaml.Node], branch: str) -> str | No
     return None
 
 
+class _Stage(IntEnum):
+    """Stages of `_file_problem`, in the order it checks them."""
+
+    UNREADABLE = 0
+    NO_JOB = 1
+    JOB_UNUSABLE = 2
+    NO_TRIGGER = 3
+    TYPES_FILTER = 4
+    BRANCH_FILTER = 5
+    PATH_FILTER = 6
+
+
 class _Problem(NamedTuple):
     """Why a workflow file does not run a check; a higher `stage` is closer to a valid file."""
 
-    stage: int
+    stage: _Stage
     message: str
-
-
-# Stages of `_file_problem`, in the order it checks them.
-(
-    _UNREADABLE,
-    _NO_JOB,
-    _JOB_UNUSABLE,
-    _NO_TRIGGER,
-    _TYPES_FILTER,
-    _BRANCH_FILTER,
-    _PATH_FILTER,
-) = range(7)
 
 
 def _workflow_check_problem(workspace: Workspace, check: str, branch: str) -> str | None:
@@ -368,7 +369,7 @@ def _workflow_check_problem(workspace: Workspace, check: str, branch: str) -> st
     for path in _workflow_files(listed):
         text = workspace.original(path)
         problem = (
-            _Problem(_UNREADABLE, "the file is not readable")
+            _Problem(_Stage.UNREADABLE, "the file is not readable")
             if text is None
             else _file_problem(text, check, branch)
         )
@@ -381,14 +382,12 @@ def _workflow_check_problem(workspace: Workspace, check: str, branch: str) -> st
 
 
 def _file_problem(text: str, check: str, branch: str) -> _Problem | None:
-    try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
-    except yaml.YAMLError as exc:
-        return _Problem(_UNREADABLE, f"invalid YAML ({getattr(exc, 'problem', None) or 'invalid'})")
-    top = _mapping(root)
-    jobs = _mapping(top.get("jobs")) if top is not None else None
-    if top is None or jobs is None:
-        return _Problem(_UNREADABLE, "no 'jobs' mapping")
+    root, error = _compose(text)
+    if error is not None:
+        return _Problem(_Stage.UNREADABLE, error)
+    jobs = _jobs_of(root)
+    if root is None or jobs is None:
+        return _Problem(_Stage.UNREADABLE, "no 'jobs' mapping")
     job_problem = _check_job_problem(jobs, check)
     if job_problem is not None:
         return job_problem
@@ -396,14 +395,14 @@ def _file_problem(text: str, check: str, branch: str) -> _Problem | None:
     _, trigger = _entry(root, "on")
     found, filters = _pull_request_trigger(trigger)
     if not found:
-        return _Problem(_NO_TRIGGER, "no pull_request trigger")
+        return _Problem(_Stage.NO_TRIGGER, "no pull_request trigger")
     return _filter_problem(filters, branch)
 
 
 def _check_job_problem(jobs: dict[str, yaml.Node], check: str) -> _Problem | None:
     """None when a job reports exactly `check`: its `name`, or its id without a `name`."""
     problem = _Problem(
-        _NO_JOB, f"no job reports the check {check!r} (its name, or its id without a name)"
+        _Stage.NO_JOB, f"no job reports the check {check!r} (its name, or its id without a name)"
     )
     for job_id, job in jobs.items():
         fields = _mapping(job)
@@ -411,17 +410,19 @@ def _check_job_problem(jobs: dict[str, yaml.Node], check: str) -> _Problem | Non
             continue
         name = _text(fields["name"]) if "name" in fields else job_id
         if name is not None and "${{" in name:
-            problem = _Problem(_JOB_UNUSABLE, f"job {job_id}: the name contains an expression")
+            problem = _Problem(
+                _Stage.JOB_UNUSABLE, f"job {job_id}: the name contains an expression"
+            )
         elif name != check:
             continue
         elif "uses" in fields:
             problem = _Problem(
-                _JOB_UNUSABLE,
+                _Stage.JOB_UNUSABLE,
                 f"job {job_id} calls a reusable workflow (its check is '{check} / <job>')",
             )
         elif "strategy" in fields and "matrix" in (_mapping(fields["strategy"]) or {"matrix": 0}):
             problem = _Problem(
-                _JOB_UNUSABLE, f"job {job_id} has a matrix (its check is '{check} (<value>)')"
+                _Stage.JOB_UNUSABLE, f"job {job_id} has a matrix (its check is '{check} (<value>)')"
             )
         else:
             return None
@@ -441,29 +442,30 @@ def _pull_request_trigger(trigger: yaml.Node | None) -> tuple[bool, yaml.Node | 
 def _filter_problem(filters: yaml.Node | None, branch: str) -> _Problem | None:
     fields = _mapping(filters) or {}
     if "types" in fields:
-        types = _patterns(fields["types"])
+        types = _strings(fields["types"])
         if types is None:
-            return _Problem(_TYPES_FILTER, "pull_request types cannot be read")
+            return _Problem(_Stage.TYPES_FILTER, "pull_request types cannot be read")
         if not PULL_REQUEST_TYPES.issubset(types):
             return _Problem(
-                _TYPES_FILTER,
+                _Stage.TYPES_FILTER,
                 f"pull_request types {sorted(types)} do not cover "
                 f"{', '.join(sorted(PULL_REQUEST_TYPES))}",
             )
     for key, ignore in (("branches", False), ("branches-ignore", True)):
         if key not in fields:
             continue
-        patterns = _patterns(fields[key])
+        patterns = _strings(fields[key])
         if patterns is None:
-            return _Problem(_BRANCH_FILTER, f"pull_request {key} cannot be read")
+            return _Problem(_Stage.BRANCH_FILTER, f"pull_request {key} cannot be read")
         if _branch_listed(branch, patterns) is ignore:
             return _Problem(
-                _BRANCH_FILTER, f"pull_request {key} does not run on the default branch {branch}"
+                _Stage.BRANCH_FILTER,
+                f"pull_request {key} does not run on the default branch {branch}",
             )
     for key in ("paths", "paths-ignore"):
         if key in fields:
             return _Problem(
-                _PATH_FILTER,
+                _Stage.PATH_FILTER,
                 f"pull_request has {key}: the check stays pending on a pull request "
                 "that touches no matching file",
             )
@@ -480,8 +482,8 @@ def _branch_listed(branch: str, patterns: list[str]) -> bool:
     return listed
 
 
-def _patterns(node: yaml.Node) -> list[str] | None:
-    """The filter patterns of a string or a list of strings; None for anything else."""
+def _strings(node: yaml.Node | None) -> list[str] | None:
+    """The values of a string or a list of strings; None for any other node."""
     if _text(node) is not None:
         return [_text(node) or ""]
     if isinstance(node, yaml.SequenceNode):
@@ -507,29 +509,43 @@ def _entry(node: yaml.Node, name: str) -> tuple[yaml.Node | None, yaml.Node | No
     return None, None
 
 
-def _jobs(text: str) -> tuple[dict[str, yaml.Node] | None, str | None]:
-    """The `jobs` entries of a workflow file, or None and the reason they cannot be read."""
+class _Document(NamedTuple):
+    """A composed YAML document, or the reason it cannot be parsed."""
+
+    root: yaml.Node | None
+    error: str | None
+
+
+def _compose(text: str) -> _Document:
+    """The YAML node tree of `text`, or the invalid YAML message."""
     try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        return _Document(yaml.compose(text, Loader=yaml.SafeLoader), None)
     except yaml.YAMLError as exc:
-        problem = getattr(exc, "problem", None) or "invalid YAML"
-        return None, f"invalid YAML ({problem})"
+        return _Document(None, f"invalid YAML ({getattr(exc, 'problem', None) or 'invalid'})")
+
+
+def _jobs_of(root: yaml.Node | None) -> dict[str, yaml.Node] | None:
+    """The `jobs` entries of a workflow root node; None when there is no `jobs` mapping."""
     top = _mapping(root)
-    jobs = _mapping(top.get("jobs")) if top is not None else None
+    return _mapping(top.get("jobs")) if top is not None else None
+
+
+class _Jobs(NamedTuple):
+    """The `jobs` entries of a workflow file, or None and the reason they cannot be read."""
+
+    entries: dict[str, yaml.Node] | None
+    error: str | None
+
+
+def _jobs(text: str) -> _Jobs:
+    """The `jobs` entries of a workflow file, or None and the reason they cannot be read."""
+    root, error = _compose(text)
+    if error is not None:
+        return _Jobs(None, error)
+    jobs = _jobs_of(root)
     if jobs is None:
-        return None, "no 'jobs' mapping"
-    return jobs, None
-
-
-def _labels(node: yaml.Node | None) -> list[str] | None:
-    """The labels of a `runs-on` string or list of strings; None for any other node."""
-    if _text(node) is not None:
-        return [_text(node) or ""]
-    if isinstance(node, yaml.SequenceNode):
-        texts = [_text(item) for item in node.value]
-        if all(text is not None for text in texts):
-            return [text for text in texts if text is not None]
-    return None
+        return _Jobs(None, "no 'jobs' mapping")
+    return _Jobs(jobs, None)
 
 
 def _json(node: yaml.Node) -> str:

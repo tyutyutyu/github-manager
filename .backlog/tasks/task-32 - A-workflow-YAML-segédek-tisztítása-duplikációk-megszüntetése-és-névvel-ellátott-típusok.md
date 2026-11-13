@@ -3,9 +3,10 @@ id: TASK-32
 title: >-
   A workflow-YAML segédek tisztítása: duplikációk megszüntetése és névvel
   ellátott típusok
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-13T22:41:00Z'
 labels: []
 dependencies:
   - TASK-22
@@ -69,16 +70,30 @@ A workflow-YAML segédekben minden logika egy helyen van és névvel ellátott t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `_labels` és a `_patterns` helyett egyetlen függvény adja a „string vagy stringlista" értékét, és mind az öt korábbi hívó azt használja
-- [ ] #2 A workflow-modul(ok)ban pontosan egy `yaml.compose` hívás van, és a YAML-hiba üzenete egy helyen készül
-- [ ] #3 A `jobs` leképezés kiolvasása egyetlen függvényben van
-- [ ] #4 A szakaszok egy `IntEnum` tagjai, a `_Problem.stage` típusa ez az enum, és a „legközelebb jutott fájl" kiválasztása változatlan
-- [ ] #5 A `_jobs` névvel ellátott mezőjű típust ad vissza
-- [ ] #6 A `tests/` könyvtár nem módosult, és minden teszt zöld; a hibaüzenetek változatlanok, kivéve a `problem` nélküli YAML-hiba `_jobs`-beli tartalékszövegét
+- [x] #1 A `_labels` és a `_patterns` helyett egyetlen függvény adja a „string vagy stringlista" értékét, és mind az öt korábbi hívó azt használja
+- [x] #2 A workflow-modul(ok)ban pontosan egy `yaml.compose` hívás van, és a YAML-hiba üzenete egy helyen készül
+- [x] #3 A `jobs` leképezés kiolvasása egyetlen függvényben van
+- [x] #4 A szakaszok egy `IntEnum` tagjai, a `_Problem.stage` típusa ez az enum, és a „legközelebb jutott fájl" kiválasztása változatlan
+- [x] #5 A `_jobs` névvel ellátott mezőjű típust ad vissza
+- [x] #6 A `tests/` könyvtár nem módosult, és minden teszt zöld; a hibaüzenetek változatlanok, kivéve a `problem` nélküli YAML-hiba `_jobs`-beli tartalékszövegét
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-32-a-workflow-yaml-segedek-tisztitasa-duplikaciok-m.
+
+Ellenőrzés a lezáráskor: a `git diff --stat main -- tests` üres; a `_labels\|_patterns\|range(7)` grep nem talál semmit; a `yaml.compose(` pontosan egyszer szerepel (a `_compose`-ban). `uv run ruff format -q . && task verify` zöld: 613 teszt sikeres, 1 kihagyva (nincs beállítva a GITHUB_MANAGER_SANDBOX_REPO), a lefedettség 99,45%. A main ágon ugyanennyi a nem lefedett sor (5) és a részleges ág (6), vagyis a lefedettség nem csökkent. A `_file_problem` őrfeltétele `root is None or jobs is None` lett, hogy a ty típusellenőrzés elfogadja; a viselkedés ugyanaz, mert None gyökérre a `_jobs_of` is None-t ad.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A workflow-YAML segédek (src/github_manager/rules/workflows.py) tisztítása, a szabályok viselkedésének változása nélkül. A `_labels` és a `_patterns` helyett egy `_strings` függvény van, és mind az öt hívó ezt használja. Egyetlen `_compose` segéd hívja a `yaml.compose`-t, és csak itt készül az `invalid YAML (...)` üzenet; a `_Document` NamedTuple-t adja vissza. A `jobs` leképezést csak a `_jobs_of` olvassa ki. A szakaszok a `_Stage(IntEnum)` tagjai, a sorrend a régi, így a `max`-alapú kiválasztás sem változott. A `_jobs` `_Jobs(entries, error)` NamedTuple-t ad vissza. Egyetlen, engedélyezett üzenetváltozás van: `problem` nélküli YAMLError esetén a `_jobs` most `invalid YAML (invalid)` üzenetet ad. Ellenőrzés: a tests/ nem változott, a `task verify` zöld (613 sikeres, 1 kihagyott integrációs teszt), a lefedettség 99,45%, ugyanannyi, mint a main ágon. Kockázat: alacsony, belső, privát segédeket érint.
+<!-- SECTION:FINAL_SUMMARY:END -->
