@@ -5,6 +5,7 @@ import pytest
 
 from github_manager.rules import (
     Finding,
+    FindingKind,
     RenovatePreset,
 )
 
@@ -44,7 +45,7 @@ def test_renovate_rewrites_only_the_multiline_extends_array(make_workspace) -> N
     )
     workspace = make_workspace({"renovate.json": text})
     findings = renovate().apply(workspace)
-    assert findings[0].fixable
+    assert findings[0].kind is not FindingKind.MANUAL
     assert workspace.files["renovate.json"] == text.replace("config:recommended", PRESET)
 
 
@@ -73,10 +74,10 @@ def test_renovate_adds_missing_extends_by_reserializing(make_workspace) -> None:
         ({"renovate.json5": "{extends: ['config:base']}"}, "does not extend"),
     ],
 )
-def test_renovate_reports_unfixable_configs(make_workspace, files, message) -> None:
+def test_renovate_reports_manual_configs(make_workspace, files, message) -> None:
     workspace = make_workspace(files)
     [finding] = renovate().apply(workspace)
-    assert not finding.fixable
+    assert finding.kind is FindingKind.MANUAL
     assert message in finding.message
     assert workspace.files == files
 

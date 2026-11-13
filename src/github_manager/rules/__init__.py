@@ -5,7 +5,15 @@ so the same code serves `check` (changes are discarded) and `fix` (file changes 
 committed to a pull request, setting and ruleset changes are applied to the repository).
 """
 
-from github_manager.rules.base import NOT_READABLE, REQUIRED, Finding, Options, Rule, Workspace
+from github_manager.rules.base import (
+    NOT_READABLE,
+    REQUIRED,
+    Finding,
+    FindingKind,
+    Options,
+    Rule,
+    Workspace,
+)
 from github_manager.rules.files import FileSync, RequiredFiles, RequiredLines
 from github_manager.rules.renovate import RenovatePreset
 from github_manager.rules.ruleset import RepoRuleset, ruleset_matches
@@ -20,6 +28,7 @@ __all__ = [
     "DefaultBranchPushOnly",
     "FileSync",
     "Finding",
+    "FindingKind",
     "Options",
     "RenovatePreset",
     "RepoRuleset",

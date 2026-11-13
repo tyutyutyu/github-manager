@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from github_manager.rules.base import REQUIRED, Finding, Options, Rule, Workspace
+from github_manager.rules.base import REQUIRED, Finding, FindingKind, Options, Rule, Workspace
 
 RENOVATE_CONFIG_FILES = (
     "renovate.json",
@@ -48,7 +48,9 @@ class RenovatePreset(Rule):
             return [Finding(self.id, "renovate.json is missing")]
         if len(existing) > 1:
             names = ", ".join(existing)
-            return [Finding(self.id, f"multiple Renovate configs: {names}", fixable=False)]
+            return [
+                Finding(self.id, f"multiple Renovate configs: {names}", kind=FindingKind.MANUAL)
+            ]
 
         path = existing[0]
         text = workspace.read(path) or ""
@@ -57,12 +59,14 @@ class RenovatePreset(Rule):
         try:
             config = json.loads(text)
         except json.JSONDecodeError as exc:
-            return [Finding(self.id, f"{path}: invalid JSON ({exc.msg})", fixable=False)]
+            return [Finding(self.id, f"{path}: invalid JSON ({exc.msg})", kind=FindingKind.MANUAL)]
         if not isinstance(config, dict):
-            return [Finding(self.id, f"{path}: top level must be an object", fixable=False)]
+            return [
+                Finding(self.id, f"{path}: top level must be an object", kind=FindingKind.MANUAL)
+            ]
         extends = config.get("extends", [])
         if not isinstance(extends, list):
-            return [Finding(self.id, f"{path}: 'extends' must be a list", fixable=False)]
+            return [Finding(self.id, f"{path}: 'extends' must be a list", kind=FindingKind.MANUAL)]
 
         wanted = [item for item in extends if item not in self.remove_extends]
         if self.preset not in wanted:
@@ -77,7 +81,7 @@ class RenovatePreset(Rule):
     def _manual(self, path: str, text: str) -> list[Finding]:
         if self.preset in text:
             return []
-        return [Finding(self.id, f"{path}: does not extend {self.preset}", fixable=False)]
+        return [Finding(self.id, f"{path}: does not extend {self.preset}", kind=FindingKind.MANUAL)]
 
 
 def _rewrite_extends(text: str, config: dict[str, Any]) -> str:

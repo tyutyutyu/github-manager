@@ -3,9 +3,10 @@ id: TASK-33
 title: >-
   A szabályok alaptípusainak szigorítása: Finding.kind enum és kötelező
   alapérték az Options segédekben
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-13T22:50:00Z'
 labels: []
 dependencies:
   - TASK-22
@@ -82,16 +83,40 @@ A szabályok alaptípusai nem engednek meg értelmetlen állapotot: a lelet fajt
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `Finding` fajtáját egyetlen `kind: FindingKind` mező hordozza (`PULL_REQUEST`, `DIRECT`, `MANUAL`); a `fixable` és a `setting` mező megszűnt, és a `src/` és a `tests/` nem hivatkozik rájuk
-- [ ] #2 A `FindingKind` importálható a `github_manager.rules`-ból
-- [ ] #3 A CLI kimenete, a PR törzse, a commit üzenet és a job summary ugyanazokra a leletekre megegyezik a változtatás előttivel
-- [ ] #4 Az `Options.text_list`, `text_block`, `text_lists` és `table` nem hívható `default` nélkül; az `Options.text` továbbra is elfogadja a `None` alapértéket
-- [ ] #5 A tesztek száma nem csökkent, és a valódi konfiguráció betölthető
+- [x] #1 A `Finding` fajtáját egyetlen `kind: FindingKind` mező hordozza (`PULL_REQUEST`, `DIRECT`, `MANUAL`); a `fixable` és a `setting` mező megszűnt, és a `src/` és a `tests/` nem hivatkozik rájuk
+- [x] #2 A `FindingKind` importálható a `github_manager.rules`-ból
+- [x] #3 A CLI kimenete, a PR törzse, a commit üzenet és a job summary ugyanazokra a leletekre megegyezik a változtatás előttivel
+- [x] #4 Az `Options.text_list`, `text_block`, `text_lists` és `table` nem hívható `default` nélkül; az `Options.text` továbbra is elfogadja a `None` alapértéket
+- [x] #5 A tesztek száma nem csökkent, és a valódi konfiguráció betölthető
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-33-a-szabalyok-alaptipusainak-szigoritasa-finding-k.
+
+Véglegesítés ellenőrzése (2026-11-13):
+- grep -rn fixable src tests és grep setting=True/finding.setting: nincs találat.
+- 21 helyen kind=FindingKind.MANUAL, 4 helyen kind=FindingKind.DIRECT (settings.py 2, ruleset.py 2).
+- Tesztszám: 614 (bázis b9bdf27) -> 620 (új tests/test_rules_base.py 6 esettel); csak 4 tesztnév változott, eset nem törlődött.
+- NO_COLOR=1 github-manager check -r github-manager a bázis-kódon (git archive másolat) és a változtatás után: azonos kimenet (1 repositories, 1 compliant), mindkettő exit 0; csak olvasó futás.
+- Options({}).text_list('k') -> TypeError: missing required argument 'default'; Options({}).text('key') -> None.
+- uv run ruff format -q . && task verify: exit 0, 619 passed / 1 skipped, lefedettség 99.45%, ruff/ty/deptry/audit/build zöld.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A Finding két logikai mezője (fixable, setting) helyett egyetlen kind: FindingKind (StrEnum: PULL_REQUEST, DIRECT, MANUAL; alapérték PULL_REQUEST) hordozza a lelet fajtáját, így az értelmetlen fixable=False, setting=True kombináció már nem adható meg. Minden létrehozó hely (21 MANUAL, 4 DIRECT) és olvasó hely (cli._print_report, RepoReport.manual_findings, _verify_required, _sync_pull_request, _pr_body) viselkedésváltozás nélkül átállt; a FindingKind a github_manager.rules-ból is exportálva van. Az Options.text_list, text_block, text_lists és table default paramétere kötelező, a text változatlanul None alapértékű. Az AGENTS.md leletleírása a FindingKind-ra frissült; új tests/test_rules_base.py teszteli az alapértelmezett fajtát és az Options szignatúrákat.
+
+Ellenőrzés: a régi mezőkre nincs hivatkozás a src/ és tests/ alatt; tesztszám 614 -> 620; a valódi konfiguráció betöltési tesztje zöld; a csak olvasó check -r github-manager kimenete a változtatás előtt és után azonos; uv run ruff format -q . && task verify zöld (619 passed, 1 skipped, 99.45%).
+
+Kockázat: a live összevetés megfelelő repón nem mutat leletet, így a PR-törzs és commit üzenet egyezését a meglévő motor- és CLI-tesztek, valamint a predikátumok kódszintű ekvivalenciája igazolja.
+<!-- SECTION:FINAL_SUMMARY:END -->

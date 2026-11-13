@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import StrEnum
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, Self
@@ -43,13 +44,20 @@ class Workspace(Protocol):
     ) -> None: ...
 
 
+class FindingKind(StrEnum):
+    # Fixed by the compliance pull request (file changes).
+    PULL_REQUEST = "pull request"
+    # A setting or ruleset applied directly to the repository.
+    DIRECT = "direct"
+    # Only reported; a human decides.
+    MANUAL = "manual"
+
+
 @dataclass(frozen=True)
 class Finding:
     rule_id: str
     message: str
-    fixable: bool = True
-    # Fixed through the repository settings or rulesets, not through the pull request.
-    setting: bool = False
+    kind: FindingKind = FindingKind.PULL_REQUEST
 
 
 REQUIRED = object()
@@ -77,13 +85,13 @@ class Options:
             raise ValueError(f"{key!r} must not be empty")
         return value
 
-    def text_list(self, key: str, default: Any = None) -> list[str]:
+    def text_list(self, key: str, default: Any) -> list[str]:
         value = self._take(key, list, default)
         if not all(isinstance(item, str) and item for item in value):
             raise ValueError(f"{key!r} must be a list of non-empty strings")
         return list(value)
 
-    def text_block(self, key: str, default: Any = None) -> list[str]:
+    def text_block(self, key: str, default: Any) -> list[str]:
         """A multi-line string as lines: outer blank lines and trailing spaces dropped."""
         value = self._take(key, str, default)
         lines = [line.rstrip() for line in value.splitlines()]
@@ -98,7 +106,7 @@ class Options:
             raise ValueError(f"{key!r} must not be empty")
         return lines
 
-    def text_lists(self, key: str, default: Any = None) -> list[list[str]]:
+    def text_lists(self, key: str, default: Any) -> list[list[str]]:
         value = self._take(key, list, default)
         if not all(
             isinstance(item, list)
@@ -112,7 +120,7 @@ class Options:
     def flag(self, key: str, default: bool) -> bool:
         return self._take(key, bool, default)
 
-    def table(self, key: str, default: Any = None) -> dict[str, Any]:
+    def table(self, key: str, default: Any) -> dict[str, Any]:
         return dict(self._take(key, dict, default))
 
     def has(self, key: str) -> bool:

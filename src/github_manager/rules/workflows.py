@@ -11,7 +11,15 @@ from typing import Any, ClassVar, NamedTuple, Self
 
 import yaml
 
-from github_manager.rules.base import NOT_READABLE, REQUIRED, Finding, Options, Rule, Workspace
+from github_manager.rules.base import (
+    NOT_READABLE,
+    REQUIRED,
+    Finding,
+    FindingKind,
+    Options,
+    Rule,
+    Workspace,
+)
 
 WORKFLOWS_DIR = ".github/workflows/"
 SELF_HOSTED = "self-hosted"
@@ -79,13 +87,13 @@ class SelfHostedRunners(Rule):
     def apply(self, workspace: Workspace) -> list[Finding]:
         visibility = workspace.setting("visibility")
         if visibility is None:
-            return [Finding(self.id, f"setting visibility {NOT_READABLE}", fixable=False)]
+            return [Finding(self.id, f"setting visibility {NOT_READABLE}", kind=FindingKind.MANUAL)]
         if visibility == "public":
             return []
         listed = workspace.paths(WORKFLOWS_DIR)
         if listed is None:
             message = f"{WORKFLOWS_DIR}: the workflow files cannot be listed"
-            return [Finding(self.id, message, fixable=False)]
+            return [Finding(self.id, message, kind=FindingKind.MANUAL)]
         return [
             finding
             for path in _workflow_files(listed)
@@ -140,7 +148,7 @@ class SelfHostedRunners(Rule):
         return findings
 
     def _manual(self, path: str, problem: str) -> Finding:
-        return Finding(self.id, f"{path}: {problem}", fixable=False)
+        return Finding(self.id, f"{path}: {problem}", kind=FindingKind.MANUAL)
 
     def _verified(self, new_text: str, replacements: list[_Replacement]) -> bool:
         """True when the rewritten file parses and every rewritten job is now allowed."""
@@ -277,7 +285,7 @@ class DefaultBranchPushOnly(Rule):
         problem = _push_only_problem(text, workspace.default_branch)
         if problem is None:
             return []
-        return [Finding(self.id, f"{self.path}: {problem}", fixable=False)]
+        return [Finding(self.id, f"{self.path}: {problem}", kind=FindingKind.MANUAL)]
 
 
 def _push_only_problem(text: str, branch: str) -> str | None:

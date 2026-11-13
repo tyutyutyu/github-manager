@@ -6,6 +6,7 @@ from github_manager.rules import (
     NOT_READABLE,
     BranchStrategy,
     Finding,
+    FindingKind,
     RepoSettings,
     RepoVisibility,
 )
@@ -25,8 +26,8 @@ def test_branch_strategy_compliant(make_workspace) -> None:
 def test_branch_strategy_reports_wrong_default_and_forbidden_branch(make_workspace) -> None:
     workspace = make_workspace(default_branch="master", branches={"master", "develop"})
     assert branch_strategy().apply(workspace) == [
-        Finding("bs", "default branch is 'master', expected 'main'", fixable=False),
-        Finding("bs", "forbidden branch exists: develop", fixable=False),
+        Finding("bs", "default branch is 'master', expected 'main'", kind=FindingKind.MANUAL),
+        Finding("bs", "forbidden branch exists: develop", kind=FindingKind.MANUAL),
     ]
     assert workspace.files == {}
 
@@ -53,7 +54,11 @@ def test_repo_settings_changes_differing_values(make_workspace) -> None:
     workspace = make_workspace(settings={"delete_branch_on_merge": False, "has_wiki": False})
     rule = repo_settings(delete_branch_on_merge=True, has_wiki=False)
     assert rule.apply(workspace) == [
-        Finding("rs", "setting delete_branch_on_merge is false, expected true", setting=True)
+        Finding(
+            "rs",
+            "setting delete_branch_on_merge is false, expected true",
+            kind=FindingKind.DIRECT,
+        )
     ]
     assert workspace.settings == {"delete_branch_on_merge": True, "has_wiki": False}
     assert workspace.files == {}
@@ -66,7 +71,7 @@ def test_repo_settings_reports_unreadable_setting(make_workspace) -> None:
             "rs",
             "setting delete_branch_on_merge is not readable "
             "(the token needs Administration access)",
-            fixable=False,
+            kind=FindingKind.MANUAL,
         )
     ]
     assert workspace.settings == {}
@@ -138,13 +143,13 @@ def test_security_public_mismatch_is_one_change(make_workspace) -> None:
         Finding(
             "rs",
             'setting security_and_analysis.secret_scanning is "disabled", expected "enabled"',
-            setting=True,
+            kind=FindingKind.DIRECT,
         ),
         Finding(
             "rs",
             "setting security_and_analysis.secret_scanning_push_protection "
             'is "disabled", expected "enabled"',
-            setting=True,
+            kind=FindingKind.DIRECT,
         ),
     ]
     assert workspace.settings["security_and_analysis"] == {
@@ -191,7 +196,7 @@ def test_security_reports_unreadable_field(make_workspace) -> None:
         Finding(
             "rs",
             "setting security_and_analysis is not readable (the token needs Administration access)",
-            fixable=False,
+            kind=FindingKind.MANUAL,
         )
     ]
     assert workspace.settings == {"visibility": "public"}
@@ -209,7 +214,7 @@ def test_security_reports_unreadable_key(make_workspace) -> None:
             "rs",
             "setting security_and_analysis.secret_scanning_push_protection is not readable "
             "(the token needs Administration access)",
-            fixable=False,
+            kind=FindingKind.MANUAL,
         )
     ]
 
@@ -248,7 +253,7 @@ def test_repo_visibility_reports_mismatch_as_manual(
         f'visibility is "{current}", expected "{wanted}" for owner {owner} '
         "(change it or transfer the repository)"
     )
-    assert visibility_rule().apply(workspace) == [Finding("rv", message, fixable=False)]
+    assert visibility_rule().apply(workspace) == [Finding("rv", message, kind=FindingKind.MANUAL)]
     assert workspace.settings == {"visibility": current}
     assert workspace.files == {}
 
@@ -267,7 +272,7 @@ def test_repo_visibility_does_not_read_setting_for_unlisted_owner(make_workspace
 def test_repo_visibility_unreadable_is_manual(make_workspace) -> None:
     workspace = make_workspace(full_name="tyutyutyu/x")
     assert visibility_rule().apply(workspace) == [
-        Finding("rv", f"setting visibility {NOT_READABLE}", fixable=False)
+        Finding("rv", f"setting visibility {NOT_READABLE}", kind=FindingKind.MANUAL)
     ]
 
 

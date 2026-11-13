@@ -38,11 +38,11 @@ Data flow: `cli.main` → `load_config` → `select_repos` → `process_repo` pe
 
 `check` only reports (with `--diff` it shows the changes); `fix` also writes: it opens or refreshes the single pull request and applies settings and rulesets.
 
-A `Finding` is one of three kinds:
+A `Finding` has one of three kinds (`Finding.kind`, a `FindingKind`):
 
-- fixed by the pull request: `fixable=True`, `setting=False` (file writes);
-- applied directly to the repository: `fixable=True`, `setting=True` (settings, rulesets);
-- manual: `fixable=False`; only reported, a human decides.
+- fixed by the pull request: `FindingKind.PULL_REQUEST` (file writes, the default);
+- applied directly to the repository: `FindingKind.DIRECT` (settings, rulesets);
+- manual: `FindingKind.MANUAL`; only reported, a human decides.
 
 Design decisions are recorded as Backlog decisions: `backlog decision list --plain`.
 
