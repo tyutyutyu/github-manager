@@ -43,7 +43,7 @@ class BranchStrategy(Rule):
         return findings
 
 
-# Boolean repository settings accepted by PyGithub's `Repository.edit`.
+# Boolean repository settings accepted by `PATCH /repos/{owner}/{repo}`.
 REPO_BOOL_SETTINGS = frozenset(
     {
         "allow_auto_merge",
@@ -74,7 +74,7 @@ class RepoSettings(Rule):
 
     `security_and_analysis` additionally requires the secret scanning features, on public
     repositories only (they are paid features on private ones, which are skipped).
-    Fixes are applied to the repository directly (through PyGithub), not by pull request.
+    Fixes are applied to the repository directly (through the REST API), not by pull request.
     """
 
     type_name: ClassVar[str] = "repo_settings"

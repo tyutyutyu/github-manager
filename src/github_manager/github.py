@@ -1,7 +1,4 @@
-"""Minimal GitHub REST/GraphQL client built on the standard library.
-
-Repository settings go through PyGithub; rulesets use the REST transport.
-"""
+"""Minimal GitHub REST/GraphQL client built on the standard library."""
 
 import base64
 import contextlib
@@ -16,8 +13,6 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-
-from github import Auth, Github, GithubException
 
 API_URL = "https://api.github.com"
 TIMEOUT_SECONDS = 30
@@ -92,7 +87,6 @@ class GitHub:
         self._token = token
         self._api_url = api_url.rstrip("/")
         self._open = opener
-        self._client = Github(auth=Auth.Token(token), base_url=self._api_url)
 
     # --- transport ---------------------------------------------------------
 
@@ -272,7 +266,7 @@ class GitHub:
     def merge_pr(self, repo: str, number: int) -> None:
         self.call("PUT", f"/repos/{repo}/pulls/{number}/merge", {"merge_method": "squash"})
 
-    # --- repository rulesets (REST; PyGithub has no ruleset methods) ---------
+    # --- repository rulesets -------------------------------------------------
 
     def list_rulesets(self, repo: str) -> list[dict[str, Any]] | None:
         """Repository-level rulesets, or None when the plan does not offer them."""
@@ -292,31 +286,20 @@ class GitHub:
     def update_ruleset(self, repo: str, ruleset_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.call("PUT", f"/repos/{repo}/rulesets/{ruleset_id}", payload)
 
-    # --- repository settings (PyGithub) -------------------------------------
+    # --- repository settings -------------------------------------------------
 
     def repo_settings(self, repo: str) -> dict[str, Any]:
         """The repository as GitHub returns it; settings the token may not read are absent."""
-        try:
-            return dict(self._client.get_repo(repo).raw_data)
-        except GithubException as exc:
-            raise _settings_error("GET", repo, exc) from exc
+        return dict(self.call("GET", f"/repos/{repo}"))
 
     def update_repo_settings(self, repo: str, settings: dict[str, Any]) -> None:
-        try:
-            self._client.get_repo(repo).edit(**settings)
-        except GithubException as exc:
-            raise _settings_error("PATCH", repo, exc) from exc
+        self.call("PATCH", f"/repos/{repo}", settings)
 
 
 def _pull_request(raw: dict[str, Any]) -> PullRequest:
     return PullRequest(
         raw["number"], raw["html_url"], raw["node_id"], raw.get("auto_merge") is not None
     )
-
-
-def _settings_error(method: str, repo: str, exc: GithubException) -> GitHubError:
-    detail = exc.data.get("message", exc.data) if isinstance(exc.data, dict) else exc.data
-    return GitHubError(f"{method} /repos/{repo}: HTTP {exc.status}: {detail}", exc.status)
 
 
 def _q(value: str) -> str:
