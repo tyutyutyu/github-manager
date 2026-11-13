@@ -1,9 +1,10 @@
 ---
 id: TASK-25
 title: 'README: a szabálytípusok táblázata helyett típusonkénti alfejezetek'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:33:00Z'
+updated_date: '2026-11-13T19:19:00Z'
 labels: []
 dependencies: []
 references:
@@ -61,15 +62,29 @@ A README minden szabálytípust saját, egységes szerkezetű alfejezetben ír l
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A „Rule types" szakasz rövid áttekintő táblázattal kezdődik (típus, cél, érvényesítés módja), és mind a 10 szabálytípusnak saját alfejezete van
-- [ ] #2 Minden alfejezet ugyanazt a szerkezetet követi: Checks, Options (kulcs, típus, kötelező, alapérték), Fix, Reported as manual
-- [ ] #3 A korábbi táblázat és az utána álló, típushoz tartozó bekezdések minden állítása megtalálható az új szövegben
-- [ ] #4 Minden opció, amelyet a szabályok `_build` metódusai olvasnak, szerepel a megfelelő Options táblázatban, és a README nem említ nem létező opciót
-- [ ] #5 A README többi szakasza változatlan, a belső hivatkozások működnek
+- [x] #1 A „Rule types" szakasz rövid áttekintő táblázattal kezdődik (típus, cél, érvényesítés módja), és mind a 10 szabálytípusnak saját alfejezete van
+- [x] #2 Minden alfejezet ugyanazt a szerkezetet követi: Checks, Options (kulcs, típus, kötelező, alapérték), Fix, Reported as manual
+- [x] #3 A korábbi táblázat és az utána álló, típushoz tartozó bekezdések minden állítása megtalálható az új szövegben
+- [x] #4 Minden opció, amelyet a szabályok `_build` metódusai olvasnak, szerepel a megfelelő Options táblázatban, és a README nem említ nem létező opciót
+- [x] #5 A README többi szakasza változatlan, a belső hivatkozások működnek
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-25-readme-a-szabalytipusok-tablazata-helyett-tipuso.
+
+Finalization check: grep -c '^### `' README.md = 10; diff hunks stay inside Rule types (Usage/Auto-merge/Scheduled run/Tokens/Development unchanged); every option read in the rules' _build methods (plus shared id/exclude from base.py) is in the matching Options table, the repo_settings boolean list equals REPO_BOOL_SETTINGS; every claim of the old table and the 'Not fixed automatically' list is in the matching subsection; #tokens and the ten #<type> anchors match headings. uv run ruff format -q . and task verify passed (502 tests, 99.42% coverage, build OK).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Restructured the README 'Rule types' section: a short overview table (type linked to its subsection, purpose, enforced by pull request / applied directly / report only), one shared table for the id and exclude keys, and ten '### `<type>`' subsections with the same Checks / Options / Fix / Reported as manual layout. The old wide table, the 'Not fixed automatically' list, the repo_ruleset notes and the required_workflow_check static-analysis text were merged into the matching subsections with no claim lost. The only new statement (required_lines reports malformed block markers as manual) comes straight from RequiredLines.apply. Options were checked against every _build method. Docs-only change. uv run ruff format -q . and task verify passed: 502 tests, 99.42% coverage, build OK. No follow-ups.
+<!-- SECTION:FINAL_SUMMARY:END -->

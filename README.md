@@ -56,29 +56,120 @@ without the switch.
 
 ## Rule types
 
-| Type | Checks | Fix |
+| Type | Purpose | Enforced by |
 | --- | --- | --- |
-| `required_lines` | `path` has a managed block (between `# >>> github-manager: <id>` and `# <<< github-manager: <id>`, comment prefix set by `comment`) holding exactly `lines`, and no line from `remove_lines` (a list). `lines` is one multi-line literal string (`lines = '''` … `'''`), written into the block line by line: blank lines at the start and end and trailing spaces are dropped, blank lines inside are kept, and an indented line is a configuration error | replaces or appends the block, deletes the `remove_lines` |
-| `renovate_preset` | the Renovate config extends `preset` | rewrites only the `extends` array (drops `remove_extends`), or creates `renovate.json` |
-| `file_sync` | `path` equals the template file `source` | overwrites the file |
-| `repo_settings` | the repository settings in `settings` (booleans accepted by `PATCH /repos/{owner}/{repo}`, e.g. `delete_branch_on_merge`) have the given values; optional `security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }` (only these two keys, `"enabled"` or `"disabled"`) is checked on **public repositories only** (private and internal ones are skipped: the features are paid there) | sets them directly on the repository, not by pull request (the security part in one request) |
-| `repo_ruleset` | the default branch has a ruleset named `github-manager: <id>` that forbids deletion and force pushes and requires a pull request (0 approvals, conversations resolved, squash merge only), with no bypass actors; optional `required_status_checks = { "<glob>" = ["<check>", ...] }` (globs match the repo name or `OWNER/NAME`; a repository gets the sorted union of all matching globs' checks, none if nothing matches), `required_workflow_check = "<check>"` (e.g. `verify`: added to the required checks, sorted and without duplicates, only when the default branch has a workflow that certainly runs that check on pull requests; otherwise reported as *manual* and left out) and `strict_required_status_checks` (default `false`) | creates or replaces that ruleset directly on the repository, not by pull request; other (manual, organization) rulesets are never touched. A private repository on the GitHub Free plan has no rulesets: reported as *manual* |
-| `branch_strategy` | the default branch is `default_branch` (default `main`) and none of `forbidden_branches` (default `["develop"]`) exists | none: reported as *manual* |
-| `repo_visibility` | the repository has the visibility given by `visibility = { "<owner>" = "public" \| "private" }` for its owner (case-insensitive; owners missing from the table are not checked, and every key must be listed in `owners`) | none: reported as *manual* (changing the visibility or transferring the repository is a human decision) |
-| `required_files` | every file in `paths` (a non-empty list of repository-relative paths, e.g. `[".github/workflows/sonarqube.yml"]`; no leading or trailing `/`, no `..` segment, no duplicates) exists; only the existence is checked, not the content | none: reported as *manual* (one finding per missing file; nothing is written) |
-| `default_branch_push_only` | the workflow file `path` (a direct `.yml`/`.yaml` child of `.github/workflows/`, e.g. `.github/workflows/sonarqube.yml`) runs only on pushes to the default branch: its `on` is a mapping whose only trigger is `push`, with a `branches` filter that is exactly the default branch (no glob, no `!` negation, no other branch) and no `branches-ignore`, `tags` or `tags-ignore`; `paths` and `paths-ignore` are allowed; a missing file is not reported | none: reported as *manual* (one finding naming the first problem; nothing is written) |
-| `self_hosted_runners` | in private and internal repositories (public ones are not checked), the `runs-on` of every job in `.github/workflows/*.yml\|*.yaml` equals one of the label sets in `allowed_runs_on = [["self-hosted"]]` (exact match as a set, case-insensitive; every set must contain `self-hosted`) | rewrites the `runs-on` of a job to `runs_on` (required, e.g. `["self-hosted"]`; it must equal one of the `allowed_runs_on` sets) in the pull request when it is a single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed (e.g. `[self-hosted, Linux, X64, zhukov]`) and the value sits on the same line as the `runs-on` key (a scalar or a one-line list); only that value changes, the rest of the file stays byte for byte the same, and the file is re-parsed to check the result before it is written. Everything else is reported as *manual* (see below); local `uses: ./...` calls are skipped |
+| [`required_lines`](#required_lines) | a managed block of lines in a file | pull request |
+| [`renovate_preset`](#renovate_preset) | the Renovate config extends a preset | pull request |
+| [`file_sync`](#file_sync) | a file equals a template | pull request |
+| [`repo_settings`](#repo_settings) | repository settings have given values | applied directly |
+| [`repo_ruleset`](#repo_ruleset) | a managed ruleset protects the default branch | applied directly |
+| [`branch_strategy`](#branch_strategy) | the default branch and forbidden branches | report only |
+| [`repo_visibility`](#repo_visibility) | the repository visibility per owner | report only |
+| [`required_files`](#required_files) | listed files exist | report only |
+| [`default_branch_push_only`](#default_branch_push_only) | a workflow runs only on pushes to the default branch | report only |
+| [`self_hosted_runners`](#self_hosted_runners) | private workflows run on allowed self-hosted runners | pull request |
 
-Not fixed automatically (reported as *manual*): several Renovate configs in one repo,
-invalid JSON, `.json5` configs, settings the token cannot read, several rulesets with
-the same managed name, rulesets on a private repository of the GitHub Free plan, and a
-repository whose visibility differs from `repo_visibility`, a file listed in
-`required_files` that does not exist, a `default_branch_push_only` workflow that can
-run on anything but a push to the default branch, and a job of a private or
-internal repository whose `runs-on` `self_hosted_runners` cannot rewrite: `windows-*`,
-`macos-*` and other unknown labels, expressions, matrices, mappings, external reusable
-workflows, unparsable files, and values it cannot replace safely (a multi-line list, an
-alias, an anchor or a tag).
+Every rule also takes these keys:
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `id` | string | yes | | rule id shown in findings |
+| `exclude` | list of strings | no | `[]` | shell globs of repositories the rule skips |
+
+### `required_lines`
+
+**Checks:** `path` has a managed block (between `# >>> github-manager: <id>` and
+`# <<< github-manager: <id>`, comment prefix set by `comment`) holding exactly `lines`, and
+no line from `remove_lines`. `lines` is one multi-line literal string (`lines = '''` …
+`'''`), written into the block line by line: blank lines at the start and end and trailing
+spaces are dropped, blank lines inside are kept, and an indented line is a configuration
+error.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `path` | string | yes | | file holding the block |
+| `lines` | multi-line string | yes | | content of the managed block |
+| `remove_lines` | list of strings | no | `[]` | lines that must not appear |
+| `comment` | string | no | `#` | comment prefix of the block markers |
+
+**Fix:** replaces or appends the block, deletes the `remove_lines`.
+
+**Reported as manual:** `path` has malformed managed block markers (a duplicated begin or
+end marker, a marker without its pair, or an end marker before the begin marker); the file
+is left unchanged.
+
+### `renovate_preset`
+
+**Checks:** the Renovate config extends `preset`.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `preset` | string | yes | | preset that must be extended |
+| `remove_extends` | list of strings | no | `[]` | entries dropped from `extends` |
+
+**Fix:** rewrites only the `extends` array (drops `remove_extends`), or creates
+`renovate.json`.
+
+**Reported as manual:** several Renovate configs in one repo, invalid JSON, `.json5`
+configs.
+
+### `file_sync`
+
+**Checks:** `path` equals the template file `source`.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `path` | string | yes | | file in the repository |
+| `source` | string | yes | | template file, relative to the configuration file |
+
+**Fix:** overwrites the file.
+
+**Reported as manual:** nothing.
+
+### `repo_settings`
+
+**Checks:** the repository settings in `settings` (booleans accepted by
+`PATCH /repos/{owner}/{repo}`, e.g. `delete_branch_on_merge`) have the given values;
+optional `security_and_analysis = { secret_scanning = "enabled",
+secret_scanning_push_protection = "enabled" }` (only these two keys, `"enabled"` or
+`"disabled"`) is checked on **public repositories only** (private and internal ones are
+skipped: the features are paid there).
+
+**Options:** at least one of the two keys is required and they must not both be empty.
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `settings` | table of booleans | see above | `{}` | `allow_auto_merge`, `allow_forking`, `allow_merge_commit`, `allow_rebase_merge`, `allow_squash_merge`, `allow_update_branch`, `delete_branch_on_merge`, `has_discussions`, `has_issues`, `has_projects`, `has_wiki`, `use_squash_pr_title_as_default`, `web_commit_signoff_required` |
+| `security_and_analysis` | table of strings | see above | `{}` | `secret_scanning`, `secret_scanning_push_protection`: `"enabled"` or `"disabled"` |
+
+**Fix:** sets them directly on the repository, not by pull request (the security part in
+one request).
+
+**Reported as manual:** settings the token cannot read.
+
+### `repo_ruleset`
+
+**Checks:** the default branch has a ruleset named `github-manager: <id>` that forbids
+deletion and force pushes and requires a pull request (0 approvals, conversations
+resolved, squash merge only), with no bypass actors, plus the configured required status
+checks.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `required_status_checks` | table of glob → list of strings | no | `{}` | `{ "<glob>" = ["<check>", ...] }`: globs match the repo name or `OWNER/NAME`; a repository gets the sorted union of all matching globs' checks, none if nothing matches |
+| `required_workflow_check` | string | no | none | e.g. `verify`: added to the required checks, sorted and without duplicates, only when the default branch has a workflow that certainly runs that check on pull requests (see below); otherwise reported as *manual* and left out |
+| `strict_required_status_checks` | boolean | no | `false` | branches must be up to date before merging |
+
+**Fix:** creates or replaces that ruleset directly on the repository, not by pull
+request; other (manual, organization) rulesets are never touched.
 
 `repo_ruleset` has no bypass actors: once it is applied, nobody (including the owner)
 can push to a default branch directly, only a pull request can change it. Check names in
@@ -105,6 +196,102 @@ Otherwise the finding `required check verify is not added: ...` names the closes
 filter, branch filter, unlistable file tree, invalid YAML) and the rest of the ruleset is
 still applied.
 A job skipped by `if:` is not detected; GitHub counts a skipped job as passing.
+
+**Reported as manual:** several rulesets with the same managed name; rulesets on a
+private repository of the GitHub Free plan (it has no rulesets); a
+`required_workflow_check` that cannot be added (see above).
+
+### `branch_strategy`
+
+**Checks:** the default branch is `default_branch` and none of `forbidden_branches`
+exists.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `default_branch` | string | no | `main` | expected default branch |
+| `forbidden_branches` | list of strings | no | `["develop"]` | branches that must not exist |
+
+**Fix:** none.
+
+**Reported as manual:** every finding.
+
+### `repo_visibility`
+
+**Checks:** the repository has the visibility given for its owner (case-insensitive;
+owners missing from the table are not checked, and every key must be listed in `owners`).
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `visibility` | table of owner → string | yes | | `{ "<owner>" = "public" \| "private" }`, not empty |
+
+**Fix:** none.
+
+**Reported as manual:** a repository whose visibility differs from `repo_visibility`
+(changing the visibility or transferring the repository is a human decision).
+
+### `required_files`
+
+**Checks:** every file in `paths` exists; only the existence is checked, not the content.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `paths` | list of strings | yes | | non-empty list of repository-relative paths, e.g. `[".github/workflows/sonarqube.yml"]`; no leading or trailing `/`, no `..` segment, no duplicates |
+
+**Fix:** none; nothing is written.
+
+**Reported as manual:** a file listed in `required_files` that does not exist (one
+finding per missing file).
+
+### `default_branch_push_only`
+
+**Checks:** the workflow file `path` runs only on pushes to the default branch: its `on`
+is a mapping whose only trigger is `push`, with a `branches` filter that is exactly the
+default branch (no glob, no `!` negation, no other branch) and no `branches-ignore`,
+`tags` or `tags-ignore`; `paths` and `paths-ignore` are allowed; a missing file is not
+reported.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `path` | string | yes | | a direct `.yml`/`.yaml` child of `.github/workflows/`, e.g. `.github/workflows/sonarqube.yml` |
+
+**Fix:** none; nothing is written.
+
+**Reported as manual:** a `default_branch_push_only` workflow that can run on anything
+but a push to the default branch (one finding naming the first problem).
+
+### `self_hosted_runners`
+
+**Checks:** in private and internal repositories (public ones are not checked), the
+`runs-on` of every job in `.github/workflows/*.yml|*.yaml` equals one of the label sets
+in `allowed_runs_on` (exact match as a set, case-insensitive); local `uses: ./...` calls
+are skipped.
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `allowed_runs_on` | list of lists of strings | yes | | allowed label sets, e.g. `[["self-hosted"]]`; not empty, no duplicate sets, every set must contain `self-hosted` |
+| `runs_on` | list of strings | yes | | replacement value, e.g. `["self-hosted"]`; it must equal one of the `allowed_runs_on` sets |
+
+**Fix:** rewrites the `runs-on` of a job to `runs_on` in the pull request when it is a
+single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed
+(e.g. `[self-hosted, Linux, X64, zhukov]`) and the value sits on the same line as the
+`runs-on` key (a scalar or a one-line list); only that value changes, the rest of the
+file stays byte for byte the same, and the file is re-parsed to check the result before
+it is written.
+
+**Reported as manual:** a job of a private or internal repository whose `runs-on`
+`self_hosted_runners` cannot rewrite: `windows-*`, `macos-*` and other unknown labels,
+expressions, matrices, mappings, external reusable workflows, unparsable files, and
+values it cannot replace safely (a multi-line list, an alias, an anchor or a tag).
 
 ## Auto-merge
 
