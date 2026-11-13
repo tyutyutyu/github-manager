@@ -47,6 +47,14 @@ GitHub Actions (`GITHUB_ACTIONS=true`), not in a pipe; `NO_COLOR` turns them off
 Authentication: `GH_TOKEN` / `GITHUB_TOKEN`, otherwise the token of the logged-in `gh` CLI
 (see [Tokens](#tokens)).
 
+Retries: a `GET` request that fails with HTTP 500, 502, 503 or 504 or a network error is
+tried up to three times, waiting 1 s and then 2 s. A rate-limit response (HTTP 429, or 403
+with `Retry-After` or `X-RateLimit-Remaining: 0`) is retried for any method after the wait
+GitHub asks for (`Retry-After`, the `X-RateLimit-Reset` time, or 60 s); if that wait is longer
+than 120 s, the request fails at once. Writes (`POST`, `PATCH`, `PUT`, `DELETE`) are never
+retried after a server or network error, and other 4xx responses are never retried. Every
+wait is logged as a warning.
+
 Exit codes: `0` compliant (or every finding has a pull request), `1` findings remain
 (`check`), or findings need manual action (`fix`), `2` configuration, API or unexpected error.
 With `--exit-zero` (`check` and `fix`), remaining findings exit with `0` too; errors still

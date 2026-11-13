@@ -1,10 +1,12 @@
 import base64
 import io
 import json
+import logging
 import subprocess
 import urllib.error
 import urllib.request
 from email.message import Message
+from http.client import IncompleteRead
 
 import pytest
 
@@ -21,14 +23,24 @@ class FakeResponse(io.BytesIO):
 
 
 class FakeHttp:
-    """Records requests and replays queued responses: (status, body, link)."""
+    """Records requests and replays queued responses or network errors."""
 
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, object]] = []
-        self.responses: list[tuple[int, object, str]] = []
+        self.responses: list[tuple[int, object, str, dict[str, str]] | BaseException] = []
 
-    def queue(self, body: object = None, status: int = 200, link: str = "") -> FakeHttp:
-        self.responses.append((status, body, link))
+    def queue(
+        self,
+        body: object = None,
+        status: int = 200,
+        link: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> FakeHttp:
+        self.responses.append((status, body, link, headers or {}))
+        return self
+
+    def queue_error(self, exc: BaseException) -> FakeHttp:
+        self.responses.append(exc)
         return self
 
     def __call__(self, request: urllib.request.Request):
@@ -36,11 +48,16 @@ class FakeHttp:
         body = json.loads(data) if isinstance(data, bytes) else None
         self.requests.append((request.get_method(), request.full_url, body))
         assert request.get_header("Authorization") == "Bearer secret"
-        status, payload, link = self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        status, payload, link, extra = response
         raw = b"" if payload is None else json.dumps(payload).encode()
         headers = Message()
         if link:
             headers["Link"] = link
+        for name, value in extra.items():
+            headers[name] = value
         if status >= 400:
             raise urllib.error.HTTPError(request.full_url, status, "err", headers, io.BytesIO(raw))
         return FakeResponse(raw, headers)
@@ -51,9 +68,28 @@ def http() -> FakeHttp:
     return FakeHttp()
 
 
+class FakeTime:
+    """Records sleeps instead of waiting; `now` is the clock value."""
+
+    def __init__(self) -> None:
+        self.now = 1_000_000.0
+        self.sleeps: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+    def clock(self) -> float:
+        return self.now
+
+
 @pytest.fixture
-def client(http: FakeHttp) -> GitHub:
-    return GitHub("secret", opener=http)
+def fake_time() -> FakeTime:
+    return FakeTime()
+
+
+@pytest.fixture
+def client(http: FakeHttp, fake_time: FakeTime) -> GitHub:
+    return GitHub("secret", opener=http, sleep=fake_time.sleep, clock=fake_time.clock)
 
 
 def encoded(text: str) -> dict[str, str]:
@@ -129,13 +165,14 @@ def test_network_errors_are_wrapped() -> None:
         raise urllib.error.URLError("no route")
 
     with pytest.raises(GitHubError, match="no route"):
-        GitHub("secret", opener=offline).call("GET", "/user")
+        GitHub("secret", opener=offline, sleep=lambda _: None).call("GET", "/user")
 
 
 def test_branch_sha(http: FakeHttp, client: GitHub) -> None:
     http.queue({"object": {"sha": "abc"}})
     http.queue({"message": "Git Repository is empty."}, status=409)
-    http.queue({"message": "Server Error"}, status=500)
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "Server Error"}, status=500)
     assert client.branch_sha("me/a", "github-manager/compliance") == "abc"
     assert http.requests[0][1] == f"{API}/repos/me/a/git/ref/heads/github-manager/compliance"
     assert client.branch_sha("me/a", "main") is None
@@ -148,7 +185,8 @@ def test_tree_paths(http: FakeHttp, client: GitHub) -> None:
     http.queue({"truncated": False, "tree": tree})
     http.queue({"truncated": True, "tree": []})
     http.queue({"message": "Not Found"}, status=404)
-    http.queue({"message": "Server Error"}, status=500)
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "Server Error"}, status=500)
     assert client.tree_paths("me/a", "s") == {"a"}
     assert client.tree_paths("me/a", "s") is None
     assert client.tree_paths("me/a", "s") is None
@@ -316,7 +354,9 @@ def test_list_rulesets_on_free_plan_is_none(http: FakeHttp, client: GitHub) -> N
 
 @pytest.mark.parametrize("status", [403, 404, 500])
 def test_list_rulesets_other_errors_are_raised(http: FakeHttp, client: GitHub, status) -> None:
-    http.queue({"message": "Resource not accessible by personal access token"}, status=status)
+    attempts = github.MAX_ATTEMPTS if status in github.TRANSIENT_STATUSES else 1
+    for _ in range(attempts):
+        http.queue({"message": "Resource not accessible by personal access token"}, status=status)
     with pytest.raises(GitHubError, match=f"HTTP {status}") as info:
         client.list_rulesets("o/r")
     assert info.value.status == status
@@ -333,3 +373,229 @@ def test_ruleset_reads_and_writes(http: FakeHttp, client: GitHub) -> None:
         ("PUT", f"{API}/repos/o/r/rulesets/5", payload),
         ("GET", f"{API}/repos/o/r/rulesets/5?includes_parents=false", None),
     ]
+
+
+# --- retries and rate limits ----------------------------------------------
+
+WRITE_METHODS = ["POST", "PATCH", "PUT", "DELETE"]
+NETWORK_ERRORS = [
+    urllib.error.URLError("no route"),
+    TimeoutError("timed out"),
+    ConnectionResetError("connection reset"),
+    IncompleteRead(b"x"),
+]
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_get_retries_transient_status_then_succeeds(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, status: int
+) -> None:
+    http.queue({"message": "boom"}, status=status).queue({"message": "boom"}, status=status)
+    http.queue({"ok": True})
+    assert client.call("GET", "/user") == {"ok": True}
+    assert len(http.requests) == 3
+    assert fake_time.sleeps == [1, 2]
+
+
+@pytest.mark.parametrize("exc", NETWORK_ERRORS)
+def test_get_retries_network_errors_then_succeeds(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, exc: BaseException
+) -> None:
+    http.queue_error(exc).queue({"ok": True})
+    assert client.call("GET", "/user") == {"ok": True}
+    assert len(http.requests) == 2
+    assert fake_time.sleeps == [1]
+
+
+def test_get_exhausted_transient_keeps_message_and_status(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, caplog: pytest.LogCaptureFixture
+) -> None:
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "Bad Gateway"}, status=502)
+    with (
+        caplog.at_level(logging.WARNING, logger="github_manager.github"),
+        pytest.raises(GitHubError) as info,
+    ):
+        client.call("GET", "/user")
+    assert str(info.value) == f"GET {API}/user: HTTP 502: Bad Gateway"
+    assert info.value.status == 502
+    assert len(http.requests) == github.MAX_ATTEMPTS
+    assert fake_time.sleeps == [1, 2]
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 2
+    assert all("HTTP 502" in r.getMessage() and "secret" not in r.getMessage() for r in warnings)
+
+
+@pytest.mark.parametrize("exc", NETWORK_ERRORS)
+def test_get_exhausted_network_error_is_github_error(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, exc: BaseException
+) -> None:
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue_error(exc)
+    with pytest.raises(GitHubError, match=f"^GET {API}/user: ") as info:
+        client.call("GET", "/user")
+    assert info.value.status is None
+    assert len(http.requests) == github.MAX_ATTEMPTS
+    assert fake_time.sleeps == [1, 2]
+
+
+def test_url_error_message_keeps_reason(http: FakeHttp, client: GitHub) -> None:
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue_error(urllib.error.URLError("no route"))
+    with pytest.raises(GitHubError) as info:
+        client.call("GET", "/user")
+    assert str(info.value) == f"GET {API}/user: no route"
+
+
+@pytest.mark.parametrize("method", WRITE_METHODS)
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_write_is_not_retried_after_transient_status(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, method: str, status: int
+) -> None:
+    http.queue({"message": "boom"}, status=status)
+    with pytest.raises(GitHubError, match=f"HTTP {status}") as info:
+        client.call(method, "/x", {"a": 1})
+    assert info.value.status == status
+    assert len(http.requests) == 1
+    assert fake_time.sleeps == []
+
+
+@pytest.mark.parametrize("method", WRITE_METHODS)
+@pytest.mark.parametrize("exc", NETWORK_ERRORS)
+def test_write_is_not_retried_after_network_error(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, method: str, exc: BaseException
+) -> None:
+    http.queue_error(exc)
+    with pytest.raises(GitHubError, match=f"^{method} {API}/x: "):
+        client.call(method, "/x", {"a": 1})
+    assert len(http.requests) == 1
+    assert fake_time.sleeps == []
+
+
+class BrokenBody(io.BytesIO):
+    """An error response body whose read fails mid-transfer."""
+
+    def __init__(self, exc: BaseException) -> None:
+        super().__init__()
+        self.exc = exc
+
+    def read(self, size: int | None = -1) -> bytes:
+        raise self.exc
+
+
+def broken_body_error(status: int, exc: BaseException) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(f"{API}/x", status, "err", Message(), BrokenBody(exc))
+
+
+@pytest.mark.parametrize("exc", NETWORK_ERRORS[1:])
+def test_get_retries_when_error_body_read_fails(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, exc: BaseException
+) -> None:
+    http.queue_error(broken_body_error(502, exc)).queue({"ok": True})
+    assert client.call("GET", "/x") == {"ok": True}
+    assert len(http.requests) == 2
+    assert fake_time.sleeps == [1]
+
+
+@pytest.mark.parametrize("exc", NETWORK_ERRORS[1:])
+def test_get_exhausted_with_broken_error_body_keeps_status(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, exc: BaseException
+) -> None:
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue_error(broken_body_error(502, exc))
+    with pytest.raises(GitHubError) as info:
+        client.call("GET", "/x")
+    assert str(info.value) == f"GET {API}/x: HTTP 502: err"
+    assert info.value.status == 502
+    assert len(http.requests) == github.MAX_ATTEMPTS
+    assert fake_time.sleeps == [1, 2]
+
+
+@pytest.mark.parametrize("method", WRITE_METHODS)
+@pytest.mark.parametrize("exc", NETWORK_ERRORS[1:])
+def test_write_with_broken_error_body_is_not_retried(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, method: str, exc: BaseException
+) -> None:
+    http.queue_error(broken_body_error(502, exc))
+    with pytest.raises(GitHubError) as info:
+        client.call(method, "/x", {"a": 1})
+    assert str(info.value) == f"{method} {API}/x: HTTP 502: err"
+    assert info.value.status == 502
+    assert len(http.requests) == 1
+    assert fake_time.sleeps == []
+
+
+@pytest.mark.parametrize("method", ["GET", *WRITE_METHODS])
+@pytest.mark.parametrize(
+    ("status", "headers", "wait"),
+    [
+        (429, {"Retry-After": "7"}, 7),
+        (403, {"Retry-After": "5"}, 5),
+        (403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000030"}, 31),
+        (403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "999000"}, 1),
+        (429, {}, 60),
+        (403, {"Retry-After": "soon"}, 60),
+    ],
+)
+def test_rate_limit_waits_and_retries_any_method(
+    http: FakeHttp,
+    client: GitHub,
+    fake_time: FakeTime,
+    caplog: pytest.LogCaptureFixture,
+    method: str,
+    status: int,
+    headers: dict[str, str],
+    wait: float,
+) -> None:
+    http.queue({"message": "rate limited"}, status=status, headers=headers).queue({"ok": True})
+    with caplog.at_level(logging.WARNING, logger="github_manager.github"):
+        assert client.call(method, "/x") == {"ok": True}
+    assert len(http.requests) == 2
+    assert fake_time.sleeps == [wait]
+    assert len(caplog.records) == 1
+    assert "secret" not in caplog.records[0].getMessage()
+
+
+def test_rate_limit_exhausted_keeps_status(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime
+) -> None:
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "slow down"}, status=429, headers={"Retry-After": "3"})
+    with pytest.raises(GitHubError) as info:
+        client.call("POST", "/x", {"a": 1})
+    assert str(info.value) == f"POST {API}/x: HTTP 429: slow down"
+    assert info.value.status == 429
+    assert len(http.requests) == github.MAX_ATTEMPTS
+    assert fake_time.sleeps == [3, 3]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Retry-After": "121"},
+        {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000300"},
+    ],
+)
+def test_rate_limit_too_long_fails_without_waiting(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, headers: dict[str, str]
+) -> None:
+    http.queue({"message": "API rate limit exceeded"}, status=403, headers=headers)
+    with pytest.raises(GitHubError, match=r"rate limit.*resets in \d+ s") as info:
+        client.call("GET", "/x")
+    assert str(info.value).startswith(f"GET {API}/x: HTTP 403: API rate limit exceeded")
+    assert info.value.status == 403
+    assert len(http.requests) == 1
+    assert fake_time.sleeps == []
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 422])
+def test_other_client_errors_are_not_retried(
+    http: FakeHttp, client: GitHub, fake_time: FakeTime, status: int
+) -> None:
+    http.queue({"message": "nope"}, status=status, headers={"X-RateLimit-Remaining": "42"})
+    with pytest.raises(GitHubError) as info:
+        client.call("GET", "/x")
+    assert str(info.value) == f"GET {API}/x: HTTP {status}: nope"
+    assert info.value.status == status
+    assert len(http.requests) == 1
+    assert fake_time.sleeps == []

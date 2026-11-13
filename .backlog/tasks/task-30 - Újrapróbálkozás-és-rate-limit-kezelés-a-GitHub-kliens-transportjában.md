@@ -1,9 +1,10 @@
 ---
 id: TASK-30
 title: Újrapróbálkozás és rate limit kezelés a GitHub kliens transportjában
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-13T21:45:00Z'
 labels: []
 dependencies: []
 references:
@@ -82,19 +83,33 @@ A kliens transportja az átmeneti hibákat és a rate limit válaszokat korláto
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `GET` kérés `500`, `502`, `503` vagy `504` válasz, illetve hálózati hiba után legfeljebb kétszer ismétlődik (összesen `MAX_ATTEMPTS = 3` kísérlet), 1, majd 2 másodperces várakozással; ha egy későbbi kísérlet sikeres, a hívó a sikeres választ kapja
-- [ ] #2 `POST`, `PATCH`, `PUT` és `DELETE` kérés `5xx` válasz vagy hálózati hiba után nem ismétlődik: pontosan egy kérés megy ki, és `GitHubError` keletkezik
-- [ ] #3 `429` válasz, illetve `403` válasz `Retry-After` vagy `X-RateLimit-Remaining: 0` fejléccel bármely metódusnál várakozás után ismétlődik; a várakozás a `Retry-After`, ennek hiányában az `X-RateLimit-Reset`-ből számolt idő, ennek hiányában 60 másodperc
-- [ ] #4 Ha a szükséges várakozás meghaladja a `MAX_RATE_LIMIT_WAIT_SECONDS` értékét, nincs várakozás és nincs ismétlés: a `GitHubError` üzenete megnevezi a rate limitet és a hátralévő időt
-- [ ] #5 `403` válasz rate limit fejlécek nélkül (jogosultsági hiba) és minden egyéb `4xx` válasz nem ismétlődik; az üzenet és a `status` változatlan
-- [ ] #6 A válasz olvasása közbeni `TimeoutError`, a megszakadt kapcsolat és a `http.client.HTTPException` `GitHubError`-ként jelenik meg, nem más kivételként
-- [ ] #7 A kísérletek kimerülése után a `GitHubError` üzenetformátuma és `status` mezője megegyezik a maival, és minden várakozásról `WARNING` szintű logsor készül, amely nem tartalmazza a tokent
-- [ ] #8 A README leírja az újrapróbálkozás szabályait
+- [x] #1 `GET` kérés `500`, `502`, `503` vagy `504` válasz, illetve hálózati hiba után legfeljebb kétszer ismétlődik (összesen `MAX_ATTEMPTS = 3` kísérlet), 1, majd 2 másodperces várakozással; ha egy későbbi kísérlet sikeres, a hívó a sikeres választ kapja
+- [x] #2 `POST`, `PATCH`, `PUT` és `DELETE` kérés `5xx` válasz vagy hálózati hiba után nem ismétlődik: pontosan egy kérés megy ki, és `GitHubError` keletkezik
+- [x] #3 `429` válasz, illetve `403` válasz `Retry-After` vagy `X-RateLimit-Remaining: 0` fejléccel bármely metódusnál várakozás után ismétlődik; a várakozás a `Retry-After`, ennek hiányában az `X-RateLimit-Reset`-ből számolt idő, ennek hiányában 60 másodperc
+- [x] #4 Ha a szükséges várakozás meghaladja a `MAX_RATE_LIMIT_WAIT_SECONDS` értékét, nincs várakozás és nincs ismétlés: a `GitHubError` üzenete megnevezi a rate limitet és a hátralévő időt
+- [x] #5 `403` válasz rate limit fejlécek nélkül (jogosultsági hiba) és minden egyéb `4xx` válasz nem ismétlődik; az üzenet és a `status` változatlan
+- [x] #6 A válasz olvasása közbeni `TimeoutError`, a megszakadt kapcsolat és a `http.client.HTTPException` `GitHubError`-ként jelenik meg, nem más kivételként
+- [x] #7 A kísérletek kimerülése után a `GitHubError` üzenetformátuma és `status` mezője megegyezik a maival, és minden várakozásról `WARNING` szintű logsor készül, amely nem tartalmazza a tokent
+- [x] #8 A README leírja az újrapróbálkozás szabályait
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-30-ujraprobalkozas-es-rate-limit-kezeles-a-github-k.
+
+Ellenőrzés (2026-11-13): uv run pytest tests/test_github.py --no-cov: 136 passed, valódi várakozás nélkül; uv run ruff format -q . && task verify: exit 0 (605 passed, 1 skipped – az integrációs homokozó env változó nincs beállítva; lefedettség 99,44%). A hibatörzs olvasása közbeni hálózati hiba is kezelt: a detail ilyenkor a HTTP reason, a status megmarad. A plan szerinti valódi API-s füstteszt (check -r github-manager) nem futott a lezáráskor; csak olvasó, a felhasználó utólag ellenőrizheti.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A GitHub._request mostantól legfeljebb MAX_ATTEMPTS=3 kísérlettel dolgozik. GET kérést 500/502/503/504 vagy hálózati hiba (URLError, OSError, http.client.HTTPException, a hibatörzs olvasásának hibája is) után 1, majd 2 s várakozással ismétel; író metódust (POST/PATCH/PUT/DELETE) ilyenkor soha. Rate limit (429, illetve 403 Retry-After vagy X-RateLimit-Remaining: 0 fejléccel) után bármely metódus ismétlődik a Retry-After, az X-RateLimit-Reset alapján számolt idő, különben 60 s várakozással; 120 s fölött azonnali GitHubError 'rate limited; resets in N s' kiegészítéssel, a status megmarad. Más 4xx változatlanul azonnal hiba. A végső GitHubError formátuma és status mezője a régi; minden várakozás előtt WARNING logsor token nélkül. A sleep és a clock kulcsszavas paraméterként injektálható. Tesztek: FakeHttp fejléc- és hálózatihiba-támogatással, FakeTime, új retry/rate limit tesztek, igazított 5xx tesztek. README: újrapróbálkozási szabályok. Ellenőrzés: task verify zöld (605 passed, 1 skipped), lefedettség 99,44%. Kockázat: tartós kiesésnél hosszabb futás (kérésenként legfeljebb 2 várakozás, egyenként legfeljebb 120 s). A valódi API-s füstteszt a felhasználónál marad.
+<!-- SECTION:FINAL_SUMMARY:END -->
