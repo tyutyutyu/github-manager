@@ -389,3 +389,7 @@ task verify                              # run every quality gate (same as CI)
 task dev:format                          # format and apply safe lint fixes
 task version-bump -- patch|minor|major   # bump the version via uv
 ```
+
+## License
+
+This project is licensed under the MIT License; see [LICENSE](LICENSE).

@@ -3,6 +3,8 @@ name = "github-manager"
 version = "0.1.0"
 description = "Validate and fix GitHub repositories against central rules via pull requests"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Földházi István", email = "istvan.foldhazi@gmail.com" }
 ]
