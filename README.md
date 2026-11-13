@@ -48,7 +48,7 @@ Authentication: `GH_TOKEN` / `GITHUB_TOKEN`, otherwise the token of the logged-i
 (see [Tokens](#tokens)).
 
 Exit codes: `0` compliant (or every finding has a pull request), `1` findings remain
-(`check`), or findings need manual action (`fix`), `2` configuration or API error.
+(`check`), or findings need manual action (`fix`), `2` configuration, API or unexpected error.
 
 ## Rule types
 

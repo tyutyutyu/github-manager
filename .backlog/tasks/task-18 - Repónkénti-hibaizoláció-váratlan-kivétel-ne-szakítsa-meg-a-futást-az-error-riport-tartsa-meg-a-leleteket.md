@@ -3,9 +3,10 @@ id: TASK-18
 title: >-
   Repónkénti hibaizoláció: váratlan kivétel ne szakítsa meg a futást, az error
   riport tartsa meg a leleteket
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T12:16:00Z'
+updated_date: '2026-11-13T00:03:00Z'
 labels: []
 dependencies: []
 references:
@@ -82,18 +83,38 @@ Egy repó feldolgozása közben fellépő bármely kivétel csak azt a repót vi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Ha egy repó feldolgozása nem `GitHubError` kivételt dob, a repó `error` eredményt kap `unexpected <KivételTípus>: <üzenet>` részlettel, és a többi repó feldolgozása folytatódik
-- [ ] #2 A váratlan kivétel tracebackje a stderr-re kerül
-- [ ] #3 Ha a hiba a szabályok kiértékelése után, a fix lépéseiben történik, az `error` riport tartalmazza a kiértékelt findingokat és diffeket, és a CLI kiírja őket
-- [ ] #4 Hibás repó mellett is megjelenik az összesítő és a job summary, a kilépési kód `2`
-- [ ] #5 A `KeyboardInterrupt` továbbra is megszakítja a futást
-- [ ] #6 Regressziós teszt fedi a `runs-on: !foo bar` workflow-t: a futás nem áll meg, a repó `error` eredményű
-- [ ] #7 A README „Exit codes" mondata a váratlan hibát is a `2` kódhoz sorolja
+- [x] #1 Ha egy repó feldolgozása nem `GitHubError` kivételt dob, a repó `error` eredményt kap `unexpected <KivételTípus>: <üzenet>` részlettel, és a többi repó feldolgozása folytatódik
+- [x] #2 A váratlan kivétel tracebackje a stderr-re kerül
+- [x] #3 Ha a hiba a szabályok kiértékelése után, a fix lépéseiben történik, az `error` riport tartalmazza a kiértékelt findingokat és diffeket, és a CLI kiírja őket
+- [x] #4 Hibás repó mellett is megjelenik az összesítő és a job summary, a kilépési kód `2`
+- [x] #5 A `KeyboardInterrupt` továbbra is megszakítja a futást
+- [x] #6 Regressziós teszt fedi a `runs-on: !foo bar` workflow-t: a futás nem áll meg, a repó `error` eredményű
+- [x] #7 A README „Exit codes" mondata a váratlan hibát is a `2` kódhoz sorolja
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-18-reponkenti-hibaizolacio-varatlan-kivetel-ne-szak.
+
+Validation: `uv run ruff format -q .` changed nothing; `uv run pytest tests/test_engine.py tests/test_cli.py --no-cov` 87 passed; workflow `task verify` exit 0 (491 passed, coverage 99.41%). Deviation from plan: `traceback.print_exception(exc)` instead of `traceback.print_exc()` (same stderr output, works outside the except block). `_process` split into `_evaluate` (returns `_Evaluation` or a ready skip report) and `_fix` (returns a new report via `dataclasses.replace`). cli.py unchanged.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+process_repo now catches every Exception (not BaseException) per repository. GitHubError keeps its message as detail; any other error gets 'unexpected <Type>: <message>' and its traceback on stderr. _process is split into _evaluate and _fix, so an error in the fix steps returns an ERROR report that keeps the evaluated findings and diffs (via dataclasses.replace). README exit code 2 now covers unexpected errors.
+
+Tests: engine regression for the 'runs-on: !foo bar' workflow (ConstructorError -> error, traceback on stderr), fix-step error keeps findings/diffs (GitHubError and KeyError), KeyboardInterrupt propagates; CLI tests for a two-repo run with an unexpected error (second repo processed, summary line, step summary table, exit 2) and for findings printed under a fix-step error.
+
+Verification: ruff format clean, targeted tests 87 passed, task verify exit 0 (491 passed, 99.41% coverage).
+
+Risk: a blanket except turns programming bugs into per-repo errors; mitigated by the traceback and exception type in the detail. Out of scope follow-ups stay as planned (_json() unknown YAML tag as manual finding, retries/timeouts in github.py).
+<!-- SECTION:FINAL_SUMMARY:END -->
