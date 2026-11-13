@@ -7,6 +7,12 @@
   "rangeStrategy": "pin",
   "packageRules": [
     {
+      "description": "Wait before proposing a new release (supply chain protection)",
+      "matchPackageNames": ["*"],
+      "minimumReleaseAge": "3 days",
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
       "description": "Automerge non-major updates",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "automerge": true
