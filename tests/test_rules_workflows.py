@@ -8,6 +8,7 @@ from github_manager.rules import (
     RULE_TYPES,
     DefaultBranchPushOnly,
     Finding,
+    FindingKind,
     SelfHostedRunners,
 )
 
@@ -51,7 +52,7 @@ def test_default_branch_push_only_follows_the_workspace_default_branch(make_work
         Finding(
             "po",
             f'{SONAR}: push branches ["master"] must be exactly ["main"] (the default branch)',
-            fixable=False,
+            kind=FindingKind.MANUAL,
         )
     ]
 
@@ -138,7 +139,7 @@ NO_FILTER = "without a push branches filter it runs on every branch"
 )
 def test_default_branch_push_only_reports_the_reason(make_workspace, text, problem) -> None:
     assert push_only_findings(make_workspace, text) == [
-        Finding("po", f"{SONAR}: {problem}", fixable=False)
+        Finding("po", f"{SONAR}: {problem}", kind=FindingKind.MANUAL)
     ]
 
 
@@ -198,7 +199,7 @@ def job_workspace(make_workspace, jobs: str, *, visibility="private", path=WORKF
 
 
 def manual(message: str) -> Finding:
-    return Finding("sh", message, fixable=False)
+    return Finding("sh", message, kind=FindingKind.MANUAL)
 
 
 @pytest.mark.parametrize("visibility", ["private", "internal"])
@@ -259,7 +260,7 @@ def test_self_hosted_runners_report_each_bad_job_once(make_workspace) -> None:
     )
     findings = runners_rule().apply(job_workspace(make_workspace, jobs))
     assert [finding.message.split(":")[1] for finding in findings] == [" job a", " job c"]
-    assert not any(finding.fixable for finding in findings)
+    assert not any(finding.kind is not FindingKind.MANUAL for finding in findings)
 
 
 @pytest.mark.parametrize(
@@ -317,7 +318,7 @@ def test_self_hosted_runners_report_undecidable_jobs(make_workspace, job, proble
     workspace = job_workspace(make_workspace, f"  test:\n    {job}\n")
     findings = runners_rule().apply(workspace)
     assert len(findings) == 1
-    assert not findings[0].fixable
+    assert findings[0].kind is FindingKind.MANUAL
     assert findings[0].message.startswith(f"{WORKFLOW}: job test: ")
     assert problem in findings[0].message
 
@@ -404,7 +405,7 @@ def test_self_hosted_runners_report_unusable_workflow_files(make_workspace, text
     workspace = make_workspace(files={WORKFLOW: text}, settings={"visibility": "private"})
     findings = runners_rule().apply(workspace)
     assert len(findings) == 1
-    assert not findings[0].fixable
+    assert findings[0].kind is FindingKind.MANUAL
     assert findings[0].message.startswith(f"{WORKFLOW}: {problem}")
 
 
@@ -418,11 +419,13 @@ def test_self_hosted_runners_write_only_workflow_files(make_workspace) -> None:
     workspace = job_workspace(make_workspace, "  test:\n    runs-on: ubuntu-latest\n")
     workspace.change_setting = lambda *args: pytest.fail("the rule must not change settings")
     workspace.change_ruleset = lambda *args: pytest.fail("the rule must not change rulesets")
-    assert [finding.fixable for finding in runners_rule().apply(workspace)] == [True]
+    assert [
+        finding.kind is not FindingKind.MANUAL for finding in runners_rule().apply(workspace)
+    ] == [True]
     assert list(workspace.files) == [WORKFLOW]
 
 
-def test_self_hosted_runners_never_write_unfixable_jobs(make_workspace) -> None:
+def test_self_hosted_runners_never_write_manual_jobs(make_workspace) -> None:
     workspace = job_workspace(make_workspace, "  test:\n    runs-on: windows-latest\n")
     workspace.write = lambda *args: pytest.fail("the rule must not write")
     workspace.change_setting = lambda *args: pytest.fail("the rule must not change settings")
@@ -593,7 +596,7 @@ def test_self_hosted_runners_rewrite_several_jobs_in_one_write(make_workspace) -
     workspace.write = lambda path, content: (writes.append(path), original(path, content))
     findings = runners_rule().apply(workspace)
     assert writes == [WORKFLOW]
-    assert [finding.fixable for finding in findings] == [True, True]
+    assert [finding.kind is not FindingKind.MANUAL for finding in findings] == [True, True]
     assert [finding.message.split(": ")[1] for finding in findings] == ["job a", "job c"]
     assert workspace.files[WORKFLOW].count("runs-on: self-hosted") == 3
     assert runners_rule().apply(workspace) == []
@@ -605,7 +608,7 @@ def test_self_hosted_runners_rewrite_to_flow_list_for_several_labels(make_worksp
     )
     text, findings = rewritten(make_workspace, "  test:\n    runs-on: ubuntu-latest\n", rule)
     assert text.endswith("    runs-on: [self-hosted, gpu]\n")
-    assert [finding.fixable for finding in findings] == [True]
+    assert [finding.kind is not FindingKind.MANUAL for finding in findings] == [True]
     assert (
         rule.apply(make_workspace(files={WORKFLOW: text}, settings={"visibility": "private"})) == []
     )
@@ -615,7 +618,7 @@ def test_self_hosted_runners_rewrite_flow_style_job(make_workspace) -> None:
     jobs = "  test: {runs-on: ubuntu-latest, steps: []}\n"
     text, findings = rewritten(make_workspace, jobs)
     assert text.endswith("  test: {runs-on: self-hosted, steps: []}\n")
-    assert [finding.fixable for finding in findings] == [True]
+    assert [finding.kind is not FindingKind.MANUAL for finding in findings] == [True]
 
 
 def test_self_hosted_runners_rewrite_files_independently(make_workspace) -> None:
@@ -626,7 +629,10 @@ def test_self_hosted_runners_rewrite_files_independently(make_workspace) -> None
         files={WORKFLOW: good, other: bad}, settings={"visibility": "private"}
     )
     findings = runners_rule().apply(workspace)
-    assert [(finding.fixable, finding.message.split(":")[0]) for finding in findings] == [
+    assert [
+        (finding.kind is not FindingKind.MANUAL, finding.message.split(":")[0])
+        for finding in findings
+    ] == [
         (True, WORKFLOW),
         (False, other),
     ]
@@ -657,7 +663,7 @@ def test_self_hosted_runners_do_not_rewrite_unsafe_values(make_workspace, jobs) 
     workspace.write = lambda *args: pytest.fail("an unsafe value must not be rewritten")
     findings = runners_rule().apply(workspace)
     assert findings
-    assert not any(finding.fixable for finding in findings)
+    assert not any(finding.kind is not FindingKind.MANUAL for finding in findings)
     assert all(finding.message.endswith("; cannot rewrite safely") for finding in findings)
     assert workspace.files[WORKFLOW] == before
 
@@ -687,15 +693,17 @@ def test_self_hosted_runners_leave_other_jobs_manual_without_writing(make_worksp
     workspace.write = lambda *args: pytest.fail("the rule must not write")
     findings = runners_rule().apply(workspace)
     assert len(findings) == 1
-    assert not findings[0].fixable
+    assert findings[0].kind is FindingKind.MANUAL
     assert not findings[0].message.endswith("cannot rewrite safely")
 
 
-def test_self_hosted_runners_mixed_file_rewrites_fixable_and_reports_rest(make_workspace) -> None:
+def test_self_hosted_runners_mixed_file_rewrites_pull_request_and_reports_rest(
+    make_workspace,
+) -> None:
     jobs = "  a:\n    runs-on: ubuntu-latest\n  b:\n    runs-on: windows-latest\n"
     text, findings = rewritten(make_workspace, jobs)
     assert text.endswith("  a:\n    runs-on: self-hosted\n  b:\n    runs-on: windows-latest\n")
-    assert [finding.fixable for finding in findings] == [False, True]
+    assert [finding.kind is not FindingKind.MANUAL for finding in findings] == [False, True]
 
 
 def test_self_hosted_runners_do_not_write_when_the_check_after_rewriting_fails(
@@ -709,6 +717,6 @@ def test_self_hosted_runners_do_not_write_when_the_check_after_rewriting_fails(
     workspace.write = lambda *args: pytest.fail("a failed check must not write")
     findings = rule.apply(workspace)
     assert len(findings) == 1
-    assert not findings[0].fixable
+    assert findings[0].kind is FindingKind.MANUAL
     assert findings[0].message.endswith("; cannot rewrite safely")
     assert workspace.files[WORKFLOW] == before

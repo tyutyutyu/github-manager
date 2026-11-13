@@ -13,6 +13,7 @@ from rich.text import Text
 from github_manager.config import DEFAULT_CONFIG_PATH, ConfigError, load_config
 from github_manager.engine import GitHubApi, Outcome, RepoReport, process_repo, select_repos
 from github_manager.github import GitHub, GitHubError, resolve_token
+from github_manager.rules import FindingKind
 
 EXIT_OK = 0
 EXIT_FINDINGS = 1
@@ -141,7 +142,11 @@ def _print_report(console: Console, report: RepoReport, *, show_diff: bool) -> N
     console.print(header)
     width = max((len(finding.rule_id) for finding in report.findings), default=0)
     for finding in report.findings:
-        marker = ("fix   ", "yellow") if finding.fixable else ("manual", "bold red")
+        marker = (
+            ("fix   ", "yellow")
+            if finding.kind is not FindingKind.MANUAL
+            else ("manual", "bold red")
+        )
         padding = " " * (width - len(finding.rule_id) + 2)
         line = Text.assemble("    ", marker, "  ", (finding.rule_id, "bold"), padding)
         console.print(line.append(finding.message))

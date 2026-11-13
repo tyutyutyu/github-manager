@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from github_manager.rules.base import REQUIRED, Finding, Options, Rule, Workspace
+from github_manager.rules.base import REQUIRED, Finding, FindingKind, Options, Rule, Workspace
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -51,7 +51,7 @@ class RequiredLines(Rule):
         ends = [i for i, line in enumerate(stripped) if line == self.end_marker]
         if len(begins) > 1 or len(ends) > 1 or len(begins) != len(ends) or begins > ends:
             message = f"{self.path}: malformed managed block markers"
-            return [Finding(self.id, message, fixable=False)]
+            return [Finding(self.id, message, kind=FindingKind.MANUAL)]
 
         block = [self.begin_marker, *self.lines, self.end_marker]
         unwanted = {line.strip() for line in self.remove_lines}
@@ -136,7 +136,7 @@ class RequiredFiles(Rule):
 
     def apply(self, workspace: Workspace) -> list[Finding]:
         return [
-            Finding(self.id, f"{path}: missing", fixable=False)
+            Finding(self.id, f"{path}: missing", kind=FindingKind.MANUAL)
             for path in self.paths
             if workspace.read(path) is None
         ]

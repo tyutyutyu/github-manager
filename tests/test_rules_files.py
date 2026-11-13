@@ -6,6 +6,7 @@ import pytest
 from github_manager.rules import (
     FileSync,
     Finding,
+    FindingKind,
     RequiredFiles,
     RequiredLines,
 )
@@ -73,7 +74,9 @@ def test_required_lines_custom_comment_and_final_newline(make_workspace) -> None
 def test_required_lines_reports_malformed_markers(make_workspace, text) -> None:
     workspace = make_workspace({".gitignore": text})
     findings = required_lines().apply(workspace)
-    assert findings == [Finding("gi", ".gitignore: malformed managed block markers", fixable=False)]
+    assert findings == [
+        Finding("gi", ".gitignore: malformed managed block markers", kind=FindingKind.MANUAL)
+    ]
     assert workspace.files[".gitignore"] == text
 
 
@@ -162,7 +165,9 @@ def test_required_files_empty_existing_file_counts_as_present(make_workspace) ->
 
 def test_required_files_missing_file_is_manual_and_nothing_is_written(make_workspace) -> None:
     workspace = make_workspace({"README.md": "x"})
-    assert required_files().apply(workspace) == [Finding("rf", f"{SONAR}: missing", fixable=False)]
+    assert required_files().apply(workspace) == [
+        Finding("rf", f"{SONAR}: missing", kind=FindingKind.MANUAL)
+    ]
     assert workspace.files == {"README.md": "x"}
     assert workspace.settings == {}
     assert workspace.ruleset_changes == []
@@ -171,8 +176,8 @@ def test_required_files_missing_file_is_manual_and_nothing_is_written(make_works
 def test_required_files_reports_every_missing_file_in_order(make_workspace) -> None:
     workspace = make_workspace({"b.txt": "b"})
     assert required_files("c.txt", "b.txt", "a/d.txt").apply(workspace) == [
-        Finding("rf", "c.txt: missing", fixable=False),
-        Finding("rf", "a/d.txt: missing", fixable=False),
+        Finding("rf", "c.txt: missing", kind=FindingKind.MANUAL),
+        Finding("rf", "a/d.txt: missing", kind=FindingKind.MANUAL),
     ]
 
 

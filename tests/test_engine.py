@@ -16,6 +16,7 @@ from github_manager.rules import (
     BranchStrategy,
     DefaultBranchPushOnly,
     FileSync,
+    FindingKind,
     RenovatePreset,
     RepoRuleset,
     RepoSettings,
@@ -449,7 +450,7 @@ def test_fix_merges_security_settings_of_several_rules(fake_github) -> None:
 
     report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
     assert report.outcome is Outcome.SETTINGS_UPDATED
-    assert all(finding.setting for finding in report.findings)
+    assert all(finding.kind is FindingKind.DIRECT for finding in report.findings)
     assert len(report.findings) == 2
     assert fake_github.calls == ["settings ['security_and_analysis']"]
     assert fake_github.repos[name].settings["security_and_analysis"] == {
@@ -483,7 +484,7 @@ def test_check_does_not_write_rulesets(fake_github) -> None:
 
     report = process_repo(fake_github, ruleset_config(), repo_named(fake_github, "app"), fix=False)
     assert report.outcome is Outcome.NEEDS_FIX
-    assert [(f.message, f.fixable) for f in report.findings] == [
+    assert [(f.message, f.kind is not FindingKind.MANUAL) for f in report.findings] == [
         (f"ruleset {RULESET_NAME} is missing", True)
     ]
     assert fake_github.repos[name].rulesets == {}
@@ -573,7 +574,7 @@ def test_fix_leaves_verify_out_when_the_workflow_does_not_run_on_pull_requests(
     )
 
     report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
-    assert [(f.message, f.fixable) for f in report.findings] == [
+    assert [(f.message, f.kind is not FindingKind.MANUAL) for f in report.findings] == [
         (f"ruleset {RULESET_NAME} is missing", True),
         (
             f"required check verify is not added: {VERIFY_PATH}: no pull_request trigger",
@@ -593,7 +594,7 @@ def test_verify_check_with_an_unlistable_tree_is_manual(fake_github) -> None:
     report = process_repo(
         fake_github, ruleset_config(VERIFY_RULE), repo_named(fake_github, "app"), fix=False
     )
-    assert [(f.message, f.fixable) for f in report.findings][1:] == [
+    assert [(f.message, f.kind is not FindingKind.MANUAL) for f in report.findings][1:] == [
         (
             "required check verify is not added: .github/workflows/: the workflow files "
             "cannot be listed",
@@ -611,7 +612,7 @@ def test_verify_written_by_an_earlier_rule_is_not_required_yet(fake_github, tmp_
     name = fake_github.add_repo("app", {})
 
     report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
-    assert [(f.message, f.fixable) for f in report.findings] == [
+    assert [(f.message, f.kind is not FindingKind.MANUAL) for f in report.findings] == [
         (f"{VERIFY_PATH}: missing", True),
         (f"ruleset {RULESET_NAME} is missing", True),
         (
@@ -647,7 +648,7 @@ def test_ruleset_unavailable_and_duplicate_are_manual_not_errors(fake_github) ->
             fake_github, ruleset_config(), repo_named(fake_github, name), fix=True
         )
         assert report.outcome is Outcome.NEEDS_FIX
-        assert [f.fixable for f in report.findings] == [False]
+        assert [f.kind is not FindingKind.MANUAL for f in report.findings] == [False]
     assert fake_github.calls == []
     assert fake_github.repos[free].rulesets == {}
 
@@ -869,7 +870,7 @@ def test_self_hosted_runners_fixed_and_manual_jobs_share_one_pull_request(fake_g
     assert "job test: runs-on" in body.split("### Needs manual action")[0]
 
 
-def test_self_hosted_runners_unfixable_jobs_open_no_pull_request(fake_github) -> None:
+def test_self_hosted_runners_manual_jobs_open_no_pull_request(fake_github) -> None:
     config = Config(owners=["owner"], rules=[RUNNERS_RULE])
     workflow = "jobs:\n  test:\n    runs-on: windows-latest\n"
     name = fake_github.add_repo(

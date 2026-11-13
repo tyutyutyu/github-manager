@@ -4,6 +4,7 @@ import pytest
 
 from github_manager.rules import (
     Finding,
+    FindingKind,
     RepoRuleset,
     ruleset_matches,
 )
@@ -84,7 +85,9 @@ def test_ruleset_with_all_merge_methods_is_outdated(with_server_defaults, make_w
     server = with_server_defaults(rule.payload("owner/app"), ruleset_id=7)
     server["rules"][2]["parameters"]["allowed_merge_methods"] = ["merge", "squash", "rebase"]
     workspace = make_workspace(rulesets=[server])
-    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is outdated", setting=True)]
+    assert rule.apply(workspace) == [
+        Finding("dr", f"ruleset {NAME} is outdated", kind=FindingKind.DIRECT)
+    ]
     assert workspace.ruleset_changes == [(NAME, 7, rule.payload("owner/app"))]
 
 
@@ -128,7 +131,9 @@ def test_ruleset_checks_are_the_sorted_union_of_matching_globs() -> None:
 def test_ruleset_missing(make_workspace) -> None:
     workspace = make_workspace(rulesets=[])
     rule = ruleset_rule()
-    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is missing", setting=True)]
+    assert rule.apply(workspace) == [
+        Finding("dr", f"ruleset {NAME} is missing", kind=FindingKind.DIRECT)
+    ]
     assert workspace.ruleset_changes == [(NAME, None, rule.payload("owner/app"))]
 
 
@@ -173,7 +178,9 @@ def test_ruleset_outdated(with_server_defaults, make_workspace, change) -> None:
     server = with_server_defaults(rule.payload("owner/app"), ruleset_id=7)
     change(server)
     workspace = make_workspace(rulesets=[server])
-    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is outdated", setting=True)]
+    assert rule.apply(workspace) == [
+        Finding("dr", f"ruleset {NAME} is outdated", kind=FindingKind.DIRECT)
+    ]
     assert workspace.ruleset_changes == [(NAME, 7, rule.payload("owner/app"))]
 
 
@@ -192,7 +199,9 @@ def test_ruleset_ignores_manual_and_inherited_rulesets(
     manual = {**with_server_defaults(payload, 1), "name": "Protect main"}
     inherited = with_server_defaults(payload, 2, source_type="Organization")
     workspace = make_workspace(rulesets=[manual, inherited])
-    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is missing", setting=True)]
+    assert rule.apply(workspace) == [
+        Finding("dr", f"ruleset {NAME} is missing", kind=FindingKind.DIRECT)
+    ]
     assert workspace.ruleset_changes == [(NAME, None, payload)]
 
 
@@ -203,7 +212,7 @@ def test_ruleset_duplicate_managed_name_is_manual(with_server_defaults, make_wor
         rulesets=[with_server_defaults(payload, 1), with_server_defaults(payload, 2)]
     )
     assert rule.apply(workspace) == [
-        Finding("dr", f"multiple rulesets named {NAME}", fixable=False)
+        Finding("dr", f"multiple rulesets named {NAME}", kind=FindingKind.MANUAL)
     ]
     assert workspace.ruleset_changes == []
 
@@ -211,8 +220,8 @@ def test_ruleset_duplicate_managed_name_is_manual(with_server_defaults, make_wor
 def test_ruleset_unavailable_on_free_plan_is_manual(make_workspace) -> None:
     workspace = make_workspace(rulesets_available=False)
     [finding] = ruleset_rule().apply(workspace)
-    assert not finding.fixable
-    assert not finding.setting
+    assert finding.kind is FindingKind.MANUAL
+    assert finding.kind is not FindingKind.DIRECT
     assert "GitHub Free" in finding.message
     assert workspace.ruleset_changes == []
 
@@ -473,7 +482,9 @@ def test_ruleset_adds_valid_workflow_check_to_the_glob_union(
 ) -> None:
     rule = verify_rule(required_status_checks={"app": ["verify", "lint"], "owner/*": ["audit"]})
     workspace = make_workspace({VERIFY_PATH: SIMPLE_VERIFY}, rulesets=[])
-    assert rule.apply(workspace) == [Finding("dr", f"ruleset {NAME} is missing", setting=True)]
+    assert rule.apply(workspace) == [
+        Finding("dr", f"ruleset {NAME} is missing", kind=FindingKind.DIRECT)
+    ]
     ((_, _, payload),) = workspace.ruleset_changes
     assert checked(payload) == ["audit", "lint", "verify"]
     up_to_date = make_workspace(
@@ -503,11 +514,11 @@ def test_ruleset_skips_invalid_workflow_check_but_fixes_the_rest(make_workspace)
     text = workflow(on="on: push")
     workspace = make_workspace({VERIFY_PATH: text}, rulesets=[])
     assert rule.apply(workspace) == [
-        Finding("dr", f"ruleset {NAME} is missing", setting=True),
+        Finding("dr", f"ruleset {NAME} is missing", kind=FindingKind.DIRECT),
         Finding(
             "dr",
             f"required check verify is not added: {VERIFY_PATH}: no pull_request trigger",
-            fixable=False,
+            kind=FindingKind.MANUAL,
         ),
     ]
     ((_, _, payload),) = workspace.ruleset_changes
@@ -517,7 +528,7 @@ def test_ruleset_skips_invalid_workflow_check_but_fixes_the_rest(make_workspace)
 def test_ruleset_without_workflows_adds_no_check_and_no_status_rule(make_workspace) -> None:
     workspace = make_workspace({}, rulesets=[])
     findings = verify_rule().apply(workspace)
-    assert [f.fixable for f in findings] == [True, False]
+    assert [f.kind is not FindingKind.MANUAL for f in findings] == [True, False]
     assert findings[1].message == (
         "required check verify is not added: .github/workflows/: no workflow file (.yml or .yaml)"
     )
@@ -532,14 +543,14 @@ def test_ruleset_with_an_unlistable_tree_reports_the_missing_check(make_workspac
         "dr",
         "required check verify is not added: .github/workflows/: the workflow files "
         "cannot be listed",
-        fixable=False,
+        kind=FindingKind.MANUAL,
     )
 
 
 def test_ruleset_unavailable_still_reports_the_missing_check(make_workspace) -> None:
     workspace = make_workspace({}, rulesets_available=False)
     findings = verify_rule().apply(workspace)
-    assert [f.fixable for f in findings] == [False, False]
+    assert [f.kind is not FindingKind.MANUAL for f in findings] == [False, False]
     assert findings[0].message.startswith("rulesets are not available")
 
 
@@ -550,7 +561,7 @@ def test_ruleset_drops_a_stale_workflow_check_when_the_workflow_goes_away(
     stale = with_server_defaults(rule.payload("owner/app", ["verify"]))
     workspace = make_workspace({}, rulesets=[stale])
     findings = rule.apply(workspace)
-    assert findings[0] == Finding("dr", f"ruleset {NAME} is outdated", setting=True)
+    assert findings[0] == Finding("dr", f"ruleset {NAME} is outdated", kind=FindingKind.DIRECT)
     ((_, ruleset_id, payload),) = workspace.ruleset_changes
     assert ruleset_id == 7
     assert "required_status_checks" not in rule_types(payload)

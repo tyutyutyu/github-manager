@@ -5,7 +5,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from github_manager.rules.base import NOT_READABLE, REQUIRED, Finding, Options, Rule, Workspace
+from github_manager.rules.base import (
+    NOT_READABLE,
+    REQUIRED,
+    Finding,
+    FindingKind,
+    Options,
+    Rule,
+    Workspace,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -34,9 +42,9 @@ class BranchStrategy(Rule):
             message = (
                 f"default branch is {workspace.default_branch!r}, expected {self.default_branch!r}"
             )
-            findings.append(Finding(self.id, message, fixable=False))
+            findings.append(Finding(self.id, message, kind=FindingKind.MANUAL))
         findings.extend(
-            Finding(self.id, f"forbidden branch exists: {branch}", fixable=False)
+            Finding(self.id, f"forbidden branch exists: {branch}", kind=FindingKind.MANUAL)
             for branch in self.forbidden_branches
             if workspace.branch_exists(branch)
         )
@@ -114,11 +122,11 @@ class RepoSettings(Rule):
                 continue
             if current is None:
                 message = f"setting {name} {NOT_READABLE}"
-                findings.append(Finding(self.id, message, fixable=False))
+                findings.append(Finding(self.id, message, kind=FindingKind.MANUAL))
                 continue
             workspace.change_setting(name, wanted)
             message = f"setting {name} is {json.dumps(current)}, expected {json.dumps(wanted)}"
-            findings.append(Finding(self.id, message, setting=True))
+            findings.append(Finding(self.id, message, kind=FindingKind.DIRECT))
         if self.security_and_analysis and workspace.setting("visibility") == "public":
             findings.extend(self._apply_security(workspace))
         return findings
@@ -127,7 +135,7 @@ class RepoSettings(Rule):
         current = workspace.setting("security_and_analysis")
         if not isinstance(current, dict):
             message = f"setting security_and_analysis {NOT_READABLE}"
-            return [Finding(self.id, message, fixable=False)]
+            return [Finding(self.id, message, kind=FindingKind.MANUAL)]
         findings = []
         payload = {}
         for name, wanted in self.security_and_analysis.items():
@@ -138,11 +146,11 @@ class RepoSettings(Rule):
             label = f"security_and_analysis.{name}"
             if status is None:
                 message = f"setting {label} {NOT_READABLE}"
-                findings.append(Finding(self.id, message, fixable=False))
+                findings.append(Finding(self.id, message, kind=FindingKind.MANUAL))
                 continue
             payload[name] = {"status": wanted}
             message = f"setting {label} is {json.dumps(status)}, expected {json.dumps(wanted)}"
-            findings.append(Finding(self.id, message, setting=True))
+            findings.append(Finding(self.id, message, kind=FindingKind.DIRECT))
         if payload:
             workspace.change_setting("security_and_analysis", payload)
         return findings
@@ -188,11 +196,11 @@ class RepoVisibility(Rule):
             return []
         current = workspace.setting("visibility")
         if current is None:
-            return [Finding(self.id, f"setting visibility {NOT_READABLE}", fixable=False)]
+            return [Finding(self.id, f"setting visibility {NOT_READABLE}", kind=FindingKind.MANUAL)]
         if current == wanted:
             return []
         message = (
             f"visibility is {json.dumps(current)}, expected {json.dumps(wanted)} "
             f"for owner {owner} (change it or transfer the repository)"
         )
-        return [Finding(self.id, message, fixable=False)]
+        return [Finding(self.id, message, kind=FindingKind.MANUAL)]

@@ -13,7 +13,7 @@ from typing import Any, Protocol
 
 from github_manager.config import Config
 from github_manager.github import GitHubError, PullRequest, Repo
-from github_manager.rules import Finding, RepoRuleset, ruleset_matches
+from github_manager.rules import Finding, FindingKind, RepoRuleset, ruleset_matches
 
 
 class GitHubApi(Protocol):
@@ -86,7 +86,7 @@ class RepoReport:
 
     @property
     def manual_findings(self) -> list[Finding]:
-        return [finding for finding in self.findings if not finding.fixable]
+        return [finding for finding in self.findings if finding.kind is FindingKind.MANUAL]
 
 
 class RemoteWorkspace:
@@ -369,7 +369,10 @@ def _verify_required(
     return any(
         rule.required_workflow_check == VERIFY_CHECK
         and rule.requires_workflow_check(workspace)
-        and not any(finding.rule_id == rule.id and not finding.fixable for finding in findings)
+        and not any(
+            finding.rule_id == rule.id and finding.kind is FindingKind.MANUAL
+            for finding in findings
+        )
         for rule in config.rules
         if isinstance(rule, RepoRuleset) and rule.applies_to(repo.name, repo.full_name)
     )
@@ -416,7 +419,9 @@ def _sync_pull_request(
         api.update_pr(name, pull.number, config.pr_title, body)
         return Outcome.PR_UP_TO_DATE, pull.url, pull
 
-    file_findings = [finding for finding in report.findings if not finding.setting]
+    file_findings = [
+        finding for finding in report.findings if finding.kind is not FindingKind.DIRECT
+    ]
     message = f"{config.commit_message}\n\n" + "\n".join(_finding_lines(file_findings))
     _rebuild_branch(api, name, branch, branch_sha, base_sha, message, changes)
     if pull is not None:
@@ -468,8 +473,8 @@ def _finding_lines(findings: list[Finding]) -> list[str]:
 
 
 def _pr_body(report: RepoReport) -> str:
-    fixed = [finding for finding in report.findings if finding.fixable and not finding.setting]
-    settings = [finding for finding in report.findings if finding.setting]
+    fixed = [finding for finding in report.findings if finding.kind is FindingKind.PULL_REQUEST]
+    settings = [finding for finding in report.findings if finding.kind is FindingKind.DIRECT]
     lines = [
         "This pull request was opened by **github-manager** to align the repository "
         "with the central rules.",

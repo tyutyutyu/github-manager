@@ -5,7 +5,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from github_manager.rules.base import Finding, Options, Rule, Workspace
+from github_manager.rules.base import Finding, FindingKind, Options, Rule, Workspace
 from github_manager.rules.workflows import _workflow_check_problem
 
 RULESET_PREFIX = "github-manager: "
@@ -149,13 +149,13 @@ class RepoRuleset(Rule):
         findings = self._sync(workspace, checks)
         if problem:
             message = f"required check {self.required_workflow_check} is not added: {problem}"
-            findings.append(Finding(self.id, message, fixable=False))
+            findings.append(Finding(self.id, message, kind=FindingKind.MANUAL))
         return findings
 
     def _sync(self, workspace: Workspace, checks: list[str]) -> list[Finding]:
         listed = workspace.rulesets()
         if listed is None:
-            return [Finding(self.id, RULESETS_UNAVAILABLE, fixable=False)]
+            return [Finding(self.id, RULESETS_UNAVAILABLE, kind=FindingKind.MANUAL)]
         managed = [
             item
             for item in listed
@@ -163,17 +163,21 @@ class RepoRuleset(Rule):
         ]
         if len(managed) > 1:
             message = f"multiple rulesets named {self.ruleset_name}"
-            return [Finding(self.id, message, fixable=False)]
+            return [Finding(self.id, message, kind=FindingKind.MANUAL)]
 
         wanted = self.payload(workspace.full_name, checks)
         if not managed:
             workspace.change_ruleset(self.ruleset_name, None, wanted)
-            return [Finding(self.id, f"ruleset {self.ruleset_name} is missing", setting=True)]
+            return [
+                Finding(self.id, f"ruleset {self.ruleset_name} is missing", kind=FindingKind.DIRECT)
+            ]
         ruleset_id = managed[0]["id"]
         if ruleset_matches(workspace.ruleset(ruleset_id), wanted):
             return []
         workspace.change_ruleset(self.ruleset_name, ruleset_id, wanted)
-        return [Finding(self.id, f"ruleset {self.ruleset_name} is outdated", setting=True)]
+        return [
+            Finding(self.id, f"ruleset {self.ruleset_name} is outdated", kind=FindingKind.DIRECT)
+        ]
 
 
 def ruleset_matches(current: Any, wanted: Any) -> bool:
