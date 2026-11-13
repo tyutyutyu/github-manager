@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import pytest
@@ -8,6 +8,7 @@ from github_manager.engine import (
     VERIFY_NOT_REQUIRED,
     Outcome,
     RemoteWorkspace,
+    RepoReport,
     process_repo,
     select_repos,
 )
@@ -1172,3 +1173,10 @@ def test_merge_errors_do_not_fail_the_repository(fake_github) -> None:
     )
     assert fake_github.repos[name].settings["delete_branch_on_merge"] is True
     assert len(fake_github.repos[name].rulesets) == 1
+
+
+def test_repo_report_is_immutable() -> None:
+    report = RepoReport("o/r", Outcome.COMPLIANT)
+
+    with pytest.raises(FrozenInstanceError):
+        report.outcome = Outcome.ERROR  # ty: ignore[invalid-assignment]

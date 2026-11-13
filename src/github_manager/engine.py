@@ -9,7 +9,7 @@ import traceback
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from fnmatch import fnmatchcase
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from github_manager.config import Config
 from github_manager.github import GitHubError, PullRequest, Repo
@@ -75,7 +75,7 @@ class RulesetChange:
     payload: dict[str, Any]
 
 
-@dataclass
+@dataclass(frozen=True)
 class RepoReport:
     repo: str
     outcome: Outcome
@@ -87,6 +87,14 @@ class RepoReport:
     @property
     def manual_findings(self) -> list[Finding]:
         return [finding for finding in self.findings if finding.kind is FindingKind.MANUAL]
+
+
+class _PullRequestSync(NamedTuple):
+    """The result of the pull request sync: outcome, detail and the open pull request, if any."""
+
+    outcome: Outcome
+    detail: str
+    pull: PullRequest | None
 
 
 class RemoteWorkspace:
@@ -312,9 +320,10 @@ def _evaluate(api: GitHubApi, config: Config, repo: Repo) -> _Evaluation | RepoR
 def _fix(api: GitHubApi, config: Config, repo: Repo, evaluation: _Evaluation) -> RepoReport:
     """Pull request, settings, rulesets and auto-merge; returns a new report."""
     workspace = evaluation.workspace
-    outcome, detail, pull = _sync_pull_request(
+    sync = _sync_pull_request(
         api, config, repo, evaluation.base_sha, evaluation.report, evaluation.changes
     )
+    outcome, pull = sync.outcome, sync.pull
     settings = workspace.setting_changes()
     if settings:
         api.update_repo_settings(repo.full_name, settings)
@@ -323,7 +332,7 @@ def _fix(api: GitHubApi, config: Config, repo: Repo, evaluation: _Evaluation) ->
         _apply_ruleset(api, repo.full_name, change)
     if (settings or rulesets) and outcome is Outcome.NEEDS_FIX:
         outcome = Outcome.SETTINGS_UPDATED
-    report = replace(evaluation.report, outcome=outcome, detail=detail)
+    report = replace(evaluation.report, outcome=outcome, detail=sync.detail)
     if config.auto_merge and pull is not None:
         report = replace(report, auto_merge=_auto_merge(api, config, repo, workspace, report, pull))
     return report
@@ -396,7 +405,7 @@ def _sync_pull_request(
     base_sha: str,
     report: RepoReport,
     changes: dict[str, str],
-) -> tuple[Outcome, str, PullRequest | None]:
+) -> _PullRequestSync:
     """Create, refresh or close the pull request; returns the open one, if any."""
     name, branch = repo.full_name, config.branch
     pull = api.find_open_pr(name, branch)
@@ -404,11 +413,11 @@ def _sync_pull_request(
 
     if not changes:
         if pull is None:
-            return report.outcome, "", None
+            return _PullRequestSync(report.outcome, "", None)
         api.close_pr(name, pull.number, "The default branch already satisfies the rules.")
         if branch_sha is not None:
             api.delete_branch(name, branch)
-        return Outcome.PR_CLOSED, pull.url, None
+        return _PullRequestSync(Outcome.PR_CLOSED, pull.url, None)
 
     body = _pr_body(report)
     if (
@@ -417,7 +426,7 @@ def _sync_pull_request(
         and _branch_matches(api, name, base_sha, branch_sha, changes)
     ):
         api.update_pr(name, pull.number, config.pr_title, body)
-        return Outcome.PR_UP_TO_DATE, pull.url, pull
+        return _PullRequestSync(Outcome.PR_UP_TO_DATE, pull.url, pull)
 
     file_findings = [
         finding for finding in report.findings if finding.kind is not FindingKind.DIRECT
@@ -426,9 +435,9 @@ def _sync_pull_request(
     _rebuild_branch(api, name, branch, branch_sha, base_sha, message, changes)
     if pull is not None:
         api.update_pr(name, pull.number, config.pr_title, body)
-        return Outcome.PR_UPDATED, pull.url, pull
+        return _PullRequestSync(Outcome.PR_UPDATED, pull.url, pull)
     pull = api.create_pr(name, repo.default_branch, branch, config.pr_title, body)
-    return Outcome.PR_CREATED, pull.url, pull
+    return _PullRequestSync(Outcome.PR_CREATED, pull.url, pull)
 
 
 def _rebuild_branch(
