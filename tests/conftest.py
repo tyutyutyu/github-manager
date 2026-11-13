@@ -54,6 +54,10 @@ class FakeGitHub:
         # Error messages to raise from enable_auto_merge / merge_pr.
         self.auto_merge_error: str | None = None
         self.merge_error: str | None = None
+        # (repo, number) -> mergeStateStatus; a missing key is "BLOCKED".
+        self.merge_states: dict[tuple[str, int], str] = {}
+        # Error message to raise from merge_state.
+        self.merge_state_error: str | None = None
 
     def add_repo(
         self,
@@ -194,6 +198,12 @@ class FakeGitHub:
         if self.auto_merge_error:
             raise GitHubError(self.auto_merge_error)
         self.auto_merge_on.add((repo, pull.number))
+
+    def merge_state(self, repo: str, pull: PullRequest) -> str:
+        self.calls.append(f"merge state {pull.number}")
+        if self.merge_state_error:
+            raise GitHubError(self.merge_state_error)
+        return self.merge_states.get((repo, pull.number), "BLOCKED")
 
     def merge_pr(self, repo: str, number: int) -> None:
         self.calls.append(f"merge pr {number}")

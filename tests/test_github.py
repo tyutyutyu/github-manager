@@ -278,6 +278,26 @@ def test_enable_auto_merge_raises_graphql_errors(http: FakeHttp, client: GitHub)
         client.enable_auto_merge("me/a", github.PullRequest(7, "u", "PR_7"))
 
 
+def test_merge_state_queries_the_pull_request_node(http: FakeHttp, client: GitHub) -> None:
+    http.queue({"data": {"node": {"mergeStateStatus": "CLEAN"}}})
+
+    assert client.merge_state("me/a", github.PullRequest(7, "u", "PR_7")) == "CLEAN"
+    method, url, body = http.requests[0]
+    assert (method, url) == ("POST", f"{API}/graphql")
+    assert isinstance(body, dict)
+    assert "mergeStateStatus" in body["query"]
+    assert body["variables"] == {"id": "PR_7"}
+
+
+@pytest.mark.parametrize("data", [{"node": None}, {"node": {}}])
+def test_merge_state_without_a_value_is_unknown(
+    http: FakeHttp, client: GitHub, data: dict[str, object]
+) -> None:
+    http.queue({"data": data})
+
+    assert client.merge_state("me/a", github.PullRequest(7, "u", "PR_7")) == "UNKNOWN"
+
+
 def test_merge_pr_squash_merges_through_rest(http: FakeHttp, client: GitHub) -> None:
     http.queue({"merged": True})
     client.merge_pr("me/a", 7)
@@ -346,8 +366,14 @@ def test_list_rulesets_paginates_repository_level_only(http: FakeHttp, client: G
     ]
 
 
-def test_list_rulesets_on_free_plan_is_none(http: FakeHttp, client: GitHub) -> None:
-    message = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+        "upgrade to github pro or make this repository public to enable this feature.",
+    ],
+)
+def test_list_rulesets_on_free_plan_is_none(http: FakeHttp, client: GitHub, message: str) -> None:
     http.queue({"message": message}, status=403)
     assert client.list_rulesets("o/r") is None
 

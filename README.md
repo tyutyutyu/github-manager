@@ -316,8 +316,9 @@ auto-merge** on the compliance pull request, only when all of these hold:
 It runs after the repository settings and the ruleset are applied (a new repository has
 `allow_auto_merge` off until then). The pull request branch is rebuilt on a change, so
 auto-merge is turned on again whenever the pull request was updated; an untouched pull
-request that already has it gets no new call. If the `verify` check has already passed, GitHub
-refuses auto-merge ("clean status") and the pull request is squash-merged right away. Any other
+request that already has it gets no new call. If enabling auto-merge fails and the pull request's
+merge state (`mergeStateStatus`) is `CLEAN`, e.g. the `verify` check has already passed, the
+pull request is squash-merged right away. Any other
 auto-merge or merge error does not fail the repository: it is shown under the repository's line
 (`auto-merge  failed: ...`) and in the *Auto-merge* column of the job summary, and the rest of the
 fixes are kept. A repository that does not qualify shows `auto-merge  not enabled: verify is
