@@ -62,4 +62,4 @@ jobs:
           # No --no-build: PyYAML has no wheel for this Python, so uv builds its sdist,
           # which --locked pins by the uv.lock hash. Keep these uv options identical to
           # the "Smoke-test the enforce start command" step in verify.yml.
-          uv run --locked github-manager "$MODE" --exit-zero --owner "$OWNER" ${REPO:+--repo "$REPO"}
+          uv run --locked --no-dev github-manager "$MODE" --exit-zero --owner "$OWNER" ${REPO:+--repo "$REPO"}

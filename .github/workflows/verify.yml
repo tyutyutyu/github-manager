@@ -27,5 +27,5 @@ jobs:
       # Runs before task verify, in a fresh environment, inside the required verify job.
       # Keep these uv options identical to the "Apply rules" step in enforce.yml.
       - name: Smoke-test the enforce start command
-        run: uv run --locked github-manager --help
+        run: uv run --locked --no-dev github-manager --help
       - run: task verify
