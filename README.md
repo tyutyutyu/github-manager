@@ -390,6 +390,27 @@ task dev:format                          # format and apply safe lint fixes
 task version-bump -- patch|minor|major   # bump the version via uv
 ```
 
+### Integration test
+
+`tests/test_integration_github.py` runs the compliance pull request lifecycle (created, updated
+after the default branch moves, up to date, closed) against the real GitHub API. It is skipped
+unless `GITHUB_MANAGER_SANDBOX_REPO` is set, so `task verify` and CI never run it.
+
+Prerequisites:
+
+- a dedicated sandbox repository whose name contains `sandbox` (the test refuses any other name);
+- its default branch accepts direct pushes, because the test commits to it;
+- it is outside the scope of the real rules: either not under the configured `owners`, or listed in
+  the global `exclude`;
+- a token, as for normal runs, with write access to that repository.
+
+The test uses its own synthetic configuration, never `github-manager.toml`, and closes its pull
+request and deletes its branches afterwards, even on failure.
+
+```bash
+GITHUB_MANAGER_SANDBOX_REPO=<owner>/<name> task dev:test-integration
+```
+
 ## License
 
 This project is licensed under the MIT License; see [LICENSE](LICENSE).

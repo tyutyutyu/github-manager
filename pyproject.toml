@@ -35,6 +35,7 @@ minversion = "9.0"
 strict = true
 addopts = ["-ra", "--import-mode=importlib", "--cov", "--cov-report=term-missing"]
 testpaths = ["tests"]
+markers = ["integration: talks to the real GitHub API; needs GITHUB_MANAGER_SANDBOX_REPO"]
 
 [tool.coverage.run]
 branch = true
