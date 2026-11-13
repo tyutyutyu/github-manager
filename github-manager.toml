@@ -99,7 +99,7 @@ exclude = []
 [[rules]]
 id = "repo-settings"
 type = "repo_settings"
-# Repository settings: applied directly through the GitHub API (PyGithub), not by pull
+# Repository settings: applied directly through the GitHub REST API, not by pull
 # request. Needs a token with Administration: read/write.
 # Squash is the only allowed merge method (also in the default-branch-ruleset).
 settings = { delete_branch_on_merge = true, allow_auto_merge = true, allow_update_branch = true, has_wiki = false, allow_squash_merge = true, allow_merge_commit = false, allow_rebase_merge = false }

@@ -7,7 +7,6 @@ import urllib.request
 from email.message import Message
 
 import pytest
-from github import GithubException
 
 from github_manager import github
 from github_manager.github import GitHub, GitHubError, resolve_token
@@ -266,58 +265,37 @@ def test_resolve_token_falls_back_to_gh(monkeypatch: pytest.MonkeyPatch) -> None
         resolve_token()
 
 
-class FakeRepository:
-    def __init__(self, raw_data: dict[str, object]) -> None:
-        self.raw_data = raw_data
-        self.edits: list[dict[str, object]] = []
-
-    def edit(self, **settings: object) -> None:
-        self.edits.append(settings)
+def test_repo_settings_reads_the_repository(http: FakeHttp, client: GitHub) -> None:
+    http.queue({"full_name": "o/r", "delete_branch_on_merge": False})
+    assert client.repo_settings("o/r") == {"full_name": "o/r", "delete_branch_on_merge": False}
+    assert http.requests == [("GET", f"{API}/repos/o/r", None)]
 
 
-def test_repo_settings_use_pygithub(monkeypatch: pytest.MonkeyPatch, client: GitHub) -> None:
-    repository = FakeRepository({"full_name": "o/r", "delete_branch_on_merge": False})
-    requested: list[str] = []
-
-    def get_repo(name: str) -> FakeRepository:
-        requested.append(name)
-        return repository
-
-    monkeypatch.setattr(client._client, "get_repo", get_repo)
-    assert client.repo_settings("o/r")["delete_branch_on_merge"] is False
+def test_update_repo_settings_sends_one_patch(http: FakeHttp, client: GitHub) -> None:
+    http.queue({"full_name": "o/r"})
     client.update_repo_settings("o/r", {"delete_branch_on_merge": True})
-    assert repository.edits == [{"delete_branch_on_merge": True}]
-    assert requested == ["o/r", "o/r"]
+    assert http.requests == [("PATCH", f"{API}/repos/o/r", {"delete_branch_on_merge": True})]
 
 
-def test_update_repo_settings_passes_security_and_analysis(
-    monkeypatch: pytest.MonkeyPatch, client: GitHub
-) -> None:
-    repository = FakeRepository({"full_name": "o/r"})
-    monkeypatch.setattr(client._client, "get_repo", lambda name: repository)
+def test_update_repo_settings_passes_security_and_analysis(http: FakeHttp, client: GitHub) -> None:
     payload = {
         "secret_scanning": {"status": "enabled"},
         "secret_scanning_push_protection": {"status": "enabled"},
     }
+    http.queue({"full_name": "o/r"})
     client.update_repo_settings("o/r", {"security_and_analysis": payload})
-    assert repository.edits == [{"security_and_analysis": payload}]
+    assert http.requests == [("PATCH", f"{API}/repos/o/r", {"security_and_analysis": payload})]
 
 
-@pytest.mark.parametrize(
-    "data", [{"message": "Resource not accessible"}, "Resource not accessible"]
-)
-def test_repo_settings_errors_are_wrapped(
-    monkeypatch: pytest.MonkeyPatch, client: GitHub, data: object
-) -> None:
-    def get_repo(name: str) -> FakeRepository:
-        raise GithubException(403, data)
-
-    monkeypatch.setattr(client._client, "get_repo", get_repo)
-    with pytest.raises(GitHubError, match="GET /repos/o/r: HTTP 403: Resource not accessible"):
+def test_repo_settings_errors_carry_the_status(http: FakeHttp, client: GitHub) -> None:
+    error = {"message": "Resource not accessible"}
+    http.queue(error, status=403).queue(error, status=403)
+    with pytest.raises(GitHubError, match="Resource not accessible") as read:
         client.repo_settings("o/r")
-    with pytest.raises(GitHubError, match="PATCH /repos/o/r: HTTP 403") as info:
+    with pytest.raises(GitHubError, match="Resource not accessible") as write:
         client.update_repo_settings("o/r", {"delete_branch_on_merge": True})
-    assert info.value.status == 403
+    assert read.value.status == 403
+    assert write.value.status == 403
 
 
 def test_list_rulesets_paginates_repository_level_only(http: FakeHttp, client: GitHub) -> None:
