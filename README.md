@@ -346,6 +346,12 @@ the GitHub Actions: those need a manual merge. `dev` group updates still auto-me
 
 ## Tokens
 
+Repository listing depends on the token kind, recognised by its prefix: a token starting
+with `ghs_` is a GitHub App installation token, and the repositories come from
+`GET /installation/repositories` (paginated, filtered to the owner, no `GET /user` call).
+Every other token (personal access token, `gh` CLI) lists through `GET /user/repos` or
+`GET /orgs/{owner}/repos`. An installation token can be supplied as `GH_TOKEN`.
+
 A fine-grained personal access token covers a single resource owner, so every entry in
 `owners` needs its own token, stored as an Actions secret of this repository:
 
