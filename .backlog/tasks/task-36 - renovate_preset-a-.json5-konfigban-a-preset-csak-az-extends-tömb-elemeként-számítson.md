@@ -3,9 +3,10 @@ id: TASK-36
 title: >-
   renovate_preset: a .json5 konfigban a preset csak az extends tömb elemeként
   számítson
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-14T01:03:00Z'
 labels: []
 dependencies: []
 references:
@@ -74,16 +75,30 @@ Egy `.json5` Renovate-konfig pontosan akkor számít megfelelőnek, ha a preset 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Egy `.json5` konfig megfelelő, ha a preset teljes stringként az `extends` tömb eleme — idézőjeles és aposztrófos stringgel, idézőjeles és idézőjel nélküli kulccsal, többsoros tömbben és kommentek között is
-- [ ] #2 Kézi lelet keletkezik, ha a preset neve csak sor- vagy blokk-kommentben, más kulcs értékében, vagy egy hosszabb presetnév részeként szerepel
-- [ ] #3 Kézi lelet keletkezik, ha nincs `extends` tömb, vagy az üres; a lelet szövege változatlan (`<path>: does not extend <preset>`), és a program `.json5` fájlt továbbra sem ír
-- [ ] #4 A projekt futásidejű függőségei nem bővültek
-- [ ] #5 A README leírja a `.json5` konfigok ellenőrzésének szabályát
+- [x] #1 Egy `.json5` konfig megfelelő, ha a preset teljes stringként az `extends` tömb eleme — idézőjeles és aposztrófos stringgel, idézőjeles és idézőjel nélküli kulccsal, többsoros tömbben és kommentek között is
+- [x] #2 Kézi lelet keletkezik, ha a preset neve csak sor- vagy blokk-kommentben, más kulcs értékében, vagy egy hosszabb presetnév részeként szerepel
+- [x] #3 Kézi lelet keletkezik, ha nincs `extends` tömb, vagy az üres; a lelet szövege változatlan (`<path>: does not extend <preset>`), és a program `.json5` fájlt továbbra sem ír
+- [x] #4 A projekt futásidejű függőségei nem bővültek
+- [x] #5 A README leírja a `.json5` konfigok ellenőrzésének szabályát
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-36-renovate-preset-a-json5-konfigban-a-preset-csak.
+
+Ellenőrzés (2026-11-14): `uv run pytest tests -k renovate --no-cov` 27 passed; `uv tree --no-dev` csak pyyaml és rich; `git diff 6b14df1 -- pyproject.toml uv.lock` üres; ruff format/check zöld; a workflow `task verify` futása exit 0 (649 passed, 1 skipped, 99.26% lefedettség). Ismert korlát a docstringben: az első `extends` tömböt nézi beágyazott objektumban is, az escape-eket nem dekódolja.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A `RenovatePreset._manual` a `.json5` konfigban már nem részszöveg-keresést végez: az új `_json5_extends` segéd (csak `re`, standard könyvtár) regex-tokenizálással elválasztja a stringeket a kommentektől, megkeresi az első `extends` / `"extends"` / `'extends'` kulcsot `:` `[` után, és visszaadja a tömb string elemeit; a preset pontos egyezéssel kell, hogy szerepeljen. Így a kommentben, más kulcs értékében vagy hosszabb presetnév részeként előforduló név kézi leletet ad (változatlan szöveg: `<path>: does not extend <preset>`); `.json5` fájlt a program továbbra sem ír. Tesztek: 5 megfelelő és 7 nem megfelelő paraméterezett eset a `tests/test_rules_renovate.py`-ban; README pontosítva. Ellenőrzés: renovate tesztek 27 passed, `task verify` exit 0, új futásidejű függőség nincs. Kockázat: az első `extends` tömböt beágyazott objektumban (pl. `packageRules`) is elfogadja, és escape-et tartalmazó elem nem egyezik — mindkettő a docstringben rögzítve.
+<!-- SECTION:FINAL_SUMMARY:END -->

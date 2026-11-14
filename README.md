@@ -123,8 +123,11 @@ is left unchanged.
 **Fix:** rewrites only the `extends` array (drops `remove_extends`), keeping the file's
 line endings (LF or CRLF), or creates `renovate.json`.
 
-**Reported as manual:** several Renovate configs in one repo, invalid JSON, `.json5`
-configs.
+A `.json5` config is not rewritten: it passes when its `extends` array has `preset` as a
+whole string item (comments, other values and longer preset names do not count).
+
+**Reported as manual:** several Renovate configs in one repo, invalid JSON, a `.json5`
+config that does not extend `preset`.
 
 ### `file_sync`
 

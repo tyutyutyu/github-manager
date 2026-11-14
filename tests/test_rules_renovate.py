@@ -113,6 +113,37 @@ def test_renovate_reports_manual_configs(make_workspace, files, message) -> None
     assert workspace.files == files
 
 
-def test_renovate_accepts_json5_that_mentions_the_preset(make_workspace) -> None:
-    workspace = make_workspace({"renovate.json5": f"{{extends: ['{PRESET}']}}"})
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{{extends: ['{PRESET}']}}",
+        f'{{"extends": ["{PRESET}"]}}',
+        f"{{'extends': ['{PRESET}']}}",
+        f"{{\n  extends: [\n    'config:base',\n    '{PRESET}',\n  ],\n}}\n",
+        f"{{extends: [/* a */ 'config:base', // b\n '{PRESET}']}}",
+    ],
+)
+def test_renovate_accepts_json5_that_extends_the_preset(make_workspace, text) -> None:
+    workspace = make_workspace({"renovate.json5": text})
     assert renovate().apply(workspace) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{{ // TODO extend {PRESET}\n}}",
+        f"{{ /* {PRESET} */ extends: ['config:base'] }}",
+        f"{{ description: 'see {PRESET}', extends: [] }}",
+        f"{{ extends: ['{PRESET}-other'] }}",
+        "{ description: 'x' }",
+        "{ extends: [] }",
+        f"{{ extends: ['config:base'] }} // {PRESET}",
+    ],
+)
+def test_renovate_reports_json5_that_does_not_extend_the_preset(make_workspace, text) -> None:
+    files = {"renovate.json5": text}
+    workspace = make_workspace(files)
+    assert renovate().apply(workspace) == [
+        Finding("rn", f"renovate.json5: does not extend {PRESET}", kind=FindingKind.MANUAL)
+    ]
+    assert workspace.files == files
