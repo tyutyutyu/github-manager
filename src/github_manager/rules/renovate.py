@@ -87,9 +87,42 @@ class RenovatePreset(Rule):
         return [Finding(self.id, f"{path}: extends {extends} -> {wanted}")]
 
     def _manual(self, path: str, text: str) -> list[Finding]:
-        if self.preset in text:
+        if self.preset in (_json5_extends(text) or []):
             return []
         return [Finding(self.id, f"{path}: does not extend {self.preset}", kind=FindingKind.MANUAL)]
+
+
+_JSON5_TOKEN = re.compile(
+    r"""(?P<string>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"""
+    r"|(?P<comment>//[^\n]*|/\*.*?\*/)"
+    r"|(?P<punct>[\[\]:])"
+    r"|(?P<name>[A-Za-z_$][\w$]*)",
+    re.DOTALL,
+)
+_EXTENDS_KEYS = frozenset({"extends", '"extends"', "'extends'"})
+
+
+def _json5_extends(text: str) -> list[str] | None:
+    """Return the string items of the first `extends` array in a JSON5 text, or None.
+
+    A regex tokenizer that tells strings from comments, not a JSON5 parser: it takes the
+    first `extends` array even when it sits in a nested object (e.g. a `packageRules`
+    item), and an item is its raw text between the quotes (escapes are not decoded).
+    """
+    tokens = [m for m in _JSON5_TOKEN.finditer(text) if m.lastgroup != "comment"]
+    for index, token in enumerate(tokens[:-2]):
+        if token.group() not in _EXTENDS_KEYS:
+            continue
+        if [t.group() for t in tokens[index + 1 : index + 3]] != [":", "["]:
+            continue
+        items: list[str] = []
+        for item in tokens[index + 3 :]:
+            if item.group() == "]":
+                break
+            if item.lastgroup == "string":
+                items.append(item.group()[1:-1])
+        return items
+    return None
 
 
 def _rewrite_extends(text: str, config: dict[str, Any]) -> str:
