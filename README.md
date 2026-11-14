@@ -424,6 +424,28 @@ request and deletes its branches afterwards, even on failure.
 GITHUB_MANAGER_SANDBOX_REPO=<owner>/<name> task dev:test-integration
 ```
 
+## Releases
+
+Every released version has a `v<version>` git tag and a GitHub Release with generated release
+notes. The notes are built by GitHub from the titles of the merged pull requests; dependency updates
+by Renovate are listed in their own category (`.github/release.yml`).
+
+To release:
+
+1. In a pull request, run `task version-bump -- <scope>` and merge it.
+2. The `release` workflow runs when `pyproject.toml` changes on `main`. If the version has no
+   release yet, it creates the tag on that commit and the release. If it already exists, the
+   workflow does nothing. It can also be started manually (`workflow_dispatch`), for example for
+   the first release.
+
+Versioning follows SemVer:
+
+- `patch`: bug fixes;
+- `minor`: a new rule type or command-line option;
+- `major`: an incompatible change in the configuration or the command line.
+
+The `enforce` workflow always runs from the tip of `main`, not from a tag.
+
 ## License
 
 This project is licensed under the MIT License; see [LICENSE](LICENSE).

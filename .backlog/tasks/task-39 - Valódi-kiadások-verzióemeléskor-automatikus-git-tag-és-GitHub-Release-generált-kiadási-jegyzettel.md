@@ -3,9 +3,10 @@ id: TASK-39
 title: >-
   Valódi kiadások: verzióemeléskor automatikus git tag és GitHub Release
   generált kiadási jegyzettel
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-14T12:50:00Z'
 labels: []
 dependencies: []
 references:
@@ -82,17 +83,33 @@ Amikor a `main`-re olyan `pyproject.toml` kerül, amelynek verziójához még ni
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `main`-re kerülő `pyproject.toml`-változás után, ha a verzióhoz még nincs kiadás, a `release` workflow létrehozza a `v<verzió>` taget az adott commiton és a GitHub Release-t generált kiadási jegyzettel
-- [ ] #2 Ha a verzióhoz már van kiadás, a workflow hiba és változtatás nélkül ér véget
-- [ ] #3 A workflow kézzel is indítható; az action-jei teljes SHA-ra pineltek; `contents: write` jogosultsága csak ennek a workflow-nak van; a `run` szkript nem tartalmaz `${{ }}` kifejezést
-- [ ] #4 A generált jegyzetben a függőségfrissítések külön kategóriában jelennek meg (`.github/release.yml`)
-- [ ] #5 A README „Releases" szakasza leírja a kiadás menetét, a verziószámozás elvét, és azt, hogy az `enforce` a `main`-ről fut
-- [ ] #6 A `version-bump` target, valamint az `enforce` és a `verify` workflow változatlan
+- [x] #1 A `main`-re kerülő `pyproject.toml`-változás után, ha a verzióhoz még nincs kiadás, a `release` workflow létrehozza a `v<verzió>` taget az adott commiton és a GitHub Release-t generált kiadási jegyzettel
+- [x] #2 Ha a verzióhoz már van kiadás, a workflow hiba és változtatás nélkül ér véget
+- [x] #3 A workflow kézzel is indítható; az action-jei teljes SHA-ra pineltek; `contents: write` jogosultsága csak ennek a workflow-nak van; a `run` szkript nem tartalmaz `${{ }}` kifejezést
+- [x] #4 A generált jegyzetben a függőségfrissítések külön kategóriában jelennek meg (`.github/release.yml`)
+- [x] #5 A README „Releases" szakasza leírja a kiadás menetét, a verziószámozás elvét, és azt, hogy az `enforce` a `main`-ről fut
+- [x] #6 A `version-bump` target, valamint az `enforce` és a `verify` workflow változatlan
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Az első kiadás létrehozásának módja (a workflow kézi indítása) a feladat jegyzetében szerepel
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Az első kiadás létrehozásának módja (a workflow kézi indítása) a feladat jegyzetében szerepel
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-39-valodi-kiadasok-verzioemeleskor-automatikus-git.
+
+Első kiadás (merge után, tulajdonosi lépés): a release workflow kézi indítása a main ágon (gh workflow run release.yml --ref main, vagy Actions fül → release → Run workflow). Ez létrehozza a v0.1.0 taget és a GitHub Release-t; ellenőrzés: gh release view v0.1.0 és git ls-remote --tags origin v0.1.0. Újraindításkor az 'already released' üzenettel hiba nélkül véget ér.
+
+Véglegesítés (2026-11-14): a release.yml és a .github/release.yml érvényes YAML; uv version --short = 0.1.0; az action-ök SHA-i megegyeznek a verify.yml-éivel; contents: write csak a release.yml-ben; ${{ }} csak concurrency.group és env alatt. A repó függőségfrissítő PR-jainak szerzője app/renovate (bot), címke nélkül, ezért a kategóriák szerző alapján szűrnek (renovate, renovate[bot] kizárva a Changes-ből; a többi a Dependencies-be esik). uv run ruff format -q . && task verify: exit 0, 658 passed, 1 skipped, lefedettség 99.27%. A tényleges kiadás és a kategóriák megjelenítése nem automatizálható, a tulajdonos ellenőrzi az első kiadáskor.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Új release workflow (.github/workflows/release.yml): a main-re kerülő pyproject.toml-változáskor vagy kézi indításkor kiolvassa a verziót (uv version --short), ellenőrzi az X.Y.Z alakot, és ha még nincs v<verzió> kiadás, gh release create-del létrehozza a taget a triggerelő commiton és a GitHub Release-t generált jegyzettel; meglévő kiadásnál 'already released' üzenettel, hiba nélkül kilép. Az action-ök teljes SHA-ra pineltek (a verify.yml-lel azonosan), contents: write csak itt van, a run szkriptben nincs ${{ }}. A .github/release.yml a Renovate PR-okat (szerző alapján) külön Dependencies kategóriába teszi. A README új Releases szakasza leírja a kiadás menetét, a SemVer elvet és hogy az enforce a main-ről fut. A version-bump target, az enforce.yml és a verify.yml változatlan. Ellenőrzés: YAML-parse, uv version, grep-ek, task verify zöld (658 passed). Follow-up/tulajdonosi lépés: merge után a release workflow kézi indítása (gh workflow run release.yml --ref main) hozza létre a v0.1.0-t; a kategóriák megjelenítését az első kiadáskor kell megnézni.
+<!-- SECTION:FINAL_SUMMARY:END -->
