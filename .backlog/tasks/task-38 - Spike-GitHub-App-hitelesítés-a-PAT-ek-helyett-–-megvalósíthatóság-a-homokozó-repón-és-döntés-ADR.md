@@ -3,9 +3,10 @@ id: TASK-38
 title: >-
   Spike: GitHub App hitelesítés a PAT-ek helyett – megvalósíthatóság a homokozó
   repón és döntés (ADR)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-14T09:19:00Z'
 labels: []
 dependencies:
   - TASK-28
@@ -91,16 +92,30 @@ Bizonyítékokon alapuló, ADR-ben rögzített döntés arról, hogy a program �
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A Backlogban ADR rögzíti a döntést (átállás vagy maradás; egy publikus App vagy ownerenként külön App) indoklással és következményekkel
-- [ ] #2 Az ADR mind a hét feltevéshez (a–g) megadja a megfigyelt eredményt a futtatott paranccsal, vagy „nem kipróbálva" jelölést dokumentációs hivatkozással
-- [ ] #3 Az ADR megválaszolja a tervezési kérdéseket: jogosultságok, token-kiállítás a workflow-ban, a repólistázás módosítása, helyi futtatás, a tokenek kivezetése és a visszaállás
-- [ ] #4 Átállási döntés esetén a megvalósítási feladatok fel vannak véve a Backlogba, függőségekkel
-- [ ] #5 A spike csak a homokozó repóba írt; a `main` ágon a `src/`, a `.github/` és a README nem változott; a homokozóban nem maradt nyitott PR, kísérleti ág vagy kísérleti ruleset
-- [ ] #6 Az App privát kulcsa és a kiállított tokenek sem a repóba, sem a feladat jegyzetébe, sem az ADR-be nem kerültek
+- [x] #1 A Backlogban ADR rögzíti a döntést (átállás vagy maradás; egy publikus App vagy ownerenként külön App) indoklással és következményekkel
+- [x] #2 Az ADR mind a hét feltevéshez (a–g) megadja a megfigyelt eredményt a futtatott paranccsal, vagy „nem kipróbálva" jelölést dokumentációs hivatkozással
+- [x] #3 Az ADR megválaszolja a tervezési kérdéseket: jogosultságok, token-kiállítás a workflow-ban, a repólistázás módosítása, helyi futtatás, a tokenek kivezetése és a visszaállás
+- [x] #4 Átállási döntés esetén a megvalósítási feladatok fel vannak véve a Backlogba, függőségekkel
+- [x] #5 A spike csak a homokozó repóba írt; a `main` ágon a `src/`, a `.github/` és a README nem változott; a homokozóban nem maradt nyitott PR, kísérleti ág vagy kísérleti ruleset
+- [x] #6 Az App privát kulcsa és a kiállított tokenek sem a repóba, sem a feladat jegyzetébe, sem az ADR-be nem kerültek
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 A decision, a dokumentum és a követő feladatok a `backlog` CLI-vel készültek, és visszaolvashatók
-- [ ] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 A decision, a dokumentum és a követő feladatok a `backlog` CLI-vel készültek, és visszaolvashatók
+- [x] #2 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-38-spike-github-app-hitelesites-a-pat-ek-helyett-me.
+
+Finalization: decision-9 (accepted), doc-9 ADR and follow-ups TASK-40→41→42→43 verified via backlog CLI read-back. No App or sandbox access was available during the spike, so assumptions a–g are marked 'nem kipróbálva' with GitHub documentation links; TASK-40 runs the sandbox experiments. git diff vs base 8992af6 for src/, .github/, README.md is empty; changes only under .backlog/. Secret scan of new Backlog files found no keys or tokens. Sandbox remote state: not automatable, the user checks it after the workflow (spike wrote to no repository).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Spike outcome recorded as ADR: decision-9 (accepted) – switch to one public GitHub App with two installations (tyutyutyu, tyutyutyu-org) instead of the two PATs; rationale, options, permissions, workflow token issuance (actions/create-github-app-token pinned SHA, matrix change), list_repos via GET /installation/repositories, local run, PR author change, retirement and rollback are in doc-9. Assumptions a–g could not be tested (no experimental App or sandbox access), so each is marked 'nem kipróbálva' with documentation links; verifying them is TASK-40 and a prerequisite for TASK-41 (client), TASK-42 (workflow + README Tokens) and TASK-43 (PAT retirement), chained by dependencies. No changes to src/, .github/ or README; no repository writes; no secrets. task verify passed (658 passed, 1 skipped integration test). Risk: if TASK-40 refutes an assumption, decision-9 must be revised.
+<!-- SECTION:FINAL_SUMMARY:END -->
