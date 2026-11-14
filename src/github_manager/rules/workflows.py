@@ -27,6 +27,11 @@ UBUNTU_PATTERN = "ubuntu-*"
 YAML_STR = "tag:yaml.org,2002:str"
 UNSAFE_REWRITE = "cannot rewrite safely"
 PULL_REQUEST = "pull_request"
+# The most nodes (aliases expanded) of a value shown in a message, and what replaces a larger one
+# or one that cannot be rendered.
+MAX_SHOWN_NODES = 50
+TOO_LARGE = "(too large to show)"
+NOT_SHOWABLE = "(cannot be shown)"
 # The activity types a pull_request trigger runs on by default; a required check needs all.
 PULL_REQUEST_TYPES = frozenset({"opened", "synchronize", "reopened"})
 
@@ -556,9 +561,37 @@ def _jobs(text: str) -> _Jobs:
     return _Jobs(jobs, None)
 
 
+def _exceeds_shown_nodes(node: yaml.Node) -> bool:
+    """Whether the node has more than MAX_SHOWN_NODES nodes once aliases are expanded.
+
+    A shared (aliased) node is counted at every reach and the walk stops as soon as the
+    limit is passed, so it is bounded for alias bombs and self-referencing anchors.
+    """
+    pending = [node]
+    count = 0
+    while pending:
+        current = pending.pop()
+        count += 1
+        if count > MAX_SHOWN_NODES:
+            return True
+        if isinstance(current, yaml.SequenceNode):
+            pending.extend(current.value)
+        elif isinstance(current, yaml.MappingNode):
+            for key, value in current.value:
+                pending.extend((key, value))
+    return False
+
+
 def _json(node: yaml.Node) -> str:
-    """The JSON rendering of a YAML node's value, for messages."""
-    return json.dumps(yaml.SafeLoader("").construct_document(node), default=str)
+    """The JSON rendering of a YAML node's value, for messages; never raises, bounded size."""
+    if _exceeds_shown_nodes(node):
+        return TOO_LARGE
+    try:
+        return json.dumps(yaml.SafeLoader("").construct_document(node), default=str)
+    except yaml.YAMLError, ValueError, TypeError, AttributeError:
+        # Display-only boundary: construction (bad !!int, !!timestamp) or JSON encoding
+        # (non-string keys such as dates) must never take the rule down.
+        return NOT_SHOWABLE
 
 
 def _text(node: yaml.Node | None) -> str | None:
