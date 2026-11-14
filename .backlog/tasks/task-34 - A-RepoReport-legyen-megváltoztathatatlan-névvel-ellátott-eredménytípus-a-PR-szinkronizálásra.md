@@ -3,9 +3,10 @@ id: TASK-34
 title: >-
   A RepoReport legyen megváltoztathatatlan; névvel ellátott eredménytípus a
   PR-szinkronizálásra
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-13T22:57:00Z'
 labels: []
 dependencies:
   - TASK-17
@@ -72,15 +73,29 @@ A `RepoReport` `frozen` adatosztály, amelyet a feldolgozás egyszer állít ös
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `RepoReport` `frozen` adatosztály; egy mezőjének írása `FrozenInstanceError`-t ad, és ezt teszt rögzíti
-- [ ] #2 Az `engine.py` sehol nem ír át riportmezőt: a végső riport egyszer jön létre, vagy `dataclasses.replace`-szel származik
-- [ ] #3 A `_sync_pull_request` névvel ellátott mezőjű eredményt ad, és nem módosítja a paramétereit
-- [ ] #4 Minden meglévő motor- és CLI-teszt változatlan elvárásokkal zöld: az eredmények, a részletek és az auto-merge szövegek nem változtak
+- [x] #1 A `RepoReport` `frozen` adatosztály; egy mezőjének írása `FrozenInstanceError`-t ad, és ezt teszt rögzíti
+- [x] #2 Az `engine.py` sehol nem ír át riportmezőt: a végső riport egyszer jön létre, vagy `dataclasses.replace`-szel származik
+- [x] #3 A `_sync_pull_request` névvel ellátott mezőjű eredményt ad, és nem módosítja a paramétereit
+- [x] #4 Minden meglévő motor- és CLI-teszt változatlan elvárásokkal zöld: az eredmények, a részletek és az auto-merge szövegek nem változtak
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-34-a-reporeport-legyen-megvaltoztathatatlan-nevvel.
+
+Véglegesítés: a RepoReport frozen; a _fix és a hibaág replace-szel származtat, az _evaluate egyszer hozza létre. A _sync_pull_request _PullRequestSync NamedTuple-t ad (outcome, detail, pull), a paramétereit csak olvassa. A Verification grep nem ad találatot; a tests/test_engine.py és a tests/test_cli.py futása: 103 passed; a task verify zöld (620 passed, 1 skipped, lefedettség 99.45%).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A RepoReport frozen adatosztály lett (engine.py). A fix ág a PR-eredményt, a beállítás- és ruleset-változásokat helyi változókban gyűjti, és a végső riportot dataclasses.replace-szel származtatja; a hibaág is új példányt hoz létre. A _sync_pull_request névvel ellátott _PullRequestSync (NamedTuple: outcome, detail, pull) eredményt ad, amelyet a hívó mezőnévvel olvas. A lépések sorrendje (PR → beállítások → rulesetek → auto-merge) és a NEEDS_FIX → SETTINGS_UPDATED szabály nem változott, az _auto_merge továbbra is a véglegesített outcome-ot látja. Új teszt: test_repo_report_is_immutable (FrozenInstanceError). Ellenőrzés: ruff format és task verify zöld (620 passed, 1 skipped, 99.45%); a motor- és CLI-tesztek elvárásai változatlanok. Kockázat: nincs megfigyelhető viselkedésváltozás.
+<!-- SECTION:FINAL_SUMMARY:END -->
