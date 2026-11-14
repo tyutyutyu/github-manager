@@ -1,5 +1,6 @@
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, dataclass, replace
 from pathlib import Path
+from typing import Any, ClassVar, Self
 
 import pytest
 
@@ -17,6 +18,7 @@ from github_manager.rules import (
     BranchStrategy,
     DefaultBranchPushOnly,
     FileSync,
+    Finding,
     FindingKind,
     RenovatePreset,
     RepoRuleset,
@@ -24,8 +26,10 @@ from github_manager.rules import (
     RepoVisibility,
     RequiredFiles,
     RequiredLines,
+    Rule,
     SelfHostedRunners,
 )
+from github_manager.rules.base import Options, Workspace
 
 RULE = RequiredLines.from_options(
     {"id": "gi", "path": ".gitignore", "lines": ".env", "exclude": ["skip-rule"]}, Path()
@@ -275,21 +279,30 @@ def test_api_errors_are_reported_per_repository(fake_github) -> None:
     assert report.detail == "boom"
 
 
+@dataclass(frozen=True, kw_only=True)
+class ExplodingRule(Rule):
+    type_name: ClassVar[str] = "exploding"
+
+    @classmethod
+    def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
+        return cls(**common)
+
+    def apply(self, workspace: Workspace) -> list[Finding]:
+        raise RuntimeError("boom")
+
+
 def test_unexpected_error_fails_only_the_repository_with_a_traceback(fake_github, capsys) -> None:
-    config = Config(owners=["owner"], rules=[RUNNERS_RULE])
-    workflow = "jobs:\n  b:\n    runs-on: !foo bar\n"
-    fake_github.add_repo(
-        "app", {".github/workflows/ci.yml": workflow}, settings={"visibility": "private"}
-    )
+    config = Config(owners=["owner"], rules=[ExplodingRule(id="boom")])
+    fake_github.add_repo("app", {".gitignore": ""})
 
     report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=False)
 
     assert report.outcome is Outcome.ERROR
-    assert report.detail.startswith("unexpected ConstructorError: ")
+    assert report.detail.startswith("unexpected RuntimeError: ")
     assert report.findings == []
     err = capsys.readouterr().err
     assert "Traceback (most recent call last)" in err
-    assert "ConstructorError" in err
+    assert "RuntimeError" in err
 
 
 @pytest.mark.parametrize(

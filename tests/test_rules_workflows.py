@@ -11,6 +11,7 @@ from github_manager.rules import (
     FindingKind,
     SelfHostedRunners,
 )
+from github_manager.rules.workflows import NOT_SHOWABLE, TOO_LARGE
 
 SONAR = ".github/workflows/sonarqube.yml"
 
@@ -321,6 +322,47 @@ def test_self_hosted_runners_report_undecidable_jobs(make_workspace, job, proble
     assert findings[0].kind is FindingKind.MANUAL
     assert findings[0].message.startswith(f"{WORKFLOW}: job test: ")
     assert problem in findings[0].message
+
+
+def alias_bomb_definitions(levels: int) -> str:
+    """Top-level keys whose anchors nest 9 aliases per level: `*a<levels>` expands to 9**levels."""
+    lines = ["d0: &a0 [x, y]"]
+    for level in range(1, levels + 1):
+        lines.append(f"d{level}: &a{level} [{', '.join([f'*a{level - 1}'] * 9)}]")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    ("runs_on", "shown"),
+    [
+        ("{x: *a6}", TOO_LARGE),
+        ("!foo bar", NOT_SHOWABLE),
+        ("[!foo bar]", NOT_SHOWABLE),
+        ("!!int nope", NOT_SHOWABLE),
+        ("[!!int nope]", NOT_SHOWABLE),
+        ("!!float nope", NOT_SHOWABLE),
+        ("!!timestamp nope", NOT_SHOWABLE),
+        ("{2026-11-14: big}", NOT_SHOWABLE),
+        ("&r {x: *r}", None),
+    ],
+)
+def test_self_hosted_runners_show_unrenderable_runs_on_as_manual(
+    make_workspace, runs_on, shown
+) -> None:
+    text = (
+        f"name: ci\non: push\n{alias_bomb_definitions(6)}"
+        f"jobs:\n  a:\n    runs-on: {runs_on}\n  b:\n    runs-on: windows-latest\n"
+    )
+    workspace = make_workspace(files={WORKFLOW: text}, settings={"visibility": "private"})
+
+    findings = runners_rule().apply(workspace)
+
+    assert [finding.kind for finding in findings] == [FindingKind.MANUAL] * 2
+    assert findings[0].message.startswith(f"{WORKFLOW}: job a: runs-on ")
+    assert len(findings[0].message) < 300
+    if shown is not None:
+        assert shown in findings[0].message
+    assert f"{WORKFLOW}: job b: " in findings[1].message
 
 
 def test_self_hosted_runners_allow_local_reusable_workflow(make_workspace) -> None:

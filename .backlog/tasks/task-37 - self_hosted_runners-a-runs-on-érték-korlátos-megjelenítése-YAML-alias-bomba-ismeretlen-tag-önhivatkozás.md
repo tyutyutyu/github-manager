@@ -3,9 +3,10 @@ id: TASK-37
 title: >-
   self_hosted_runners: a runs-on érték korlátos megjelenítése (YAML alias-bomba,
   ismeretlen tag, önhivatkozás)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-14T07:04:00Z'
 labels: []
 dependencies:
   - TASK-18
@@ -82,17 +83,38 @@ A `runs-on` érték megjelenítése korlátos idejű, és soha nem dob kivételt
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A kilenc szinten egymásba ágyazott aliasokat tartalmazó workflow-ra a szabály 1 másodpercen belül kézi leletet ad, amely az érték helyén rövid helyettesítő szöveget tartalmaz
-- [ ] #2 Ismeretlen YAML-tagú `runs-on` (skalárként és listaelemként is) kézi leletet ad, nem kivételt
-- [ ] #3 Önhivatkozó horgonyú `runs-on` kézi leletet ad, nem kivételt
-- [ ] #4 A szokásos `runs-on` értékek üzenetei változatlanok: a meglévő `self_hosted_runners` tesztek módosítás nélkül zöldek
-- [ ] #5 Ugyanabban a fájlban a hibás job mellett álló többi job értékelése megtörténik
-- [ ] #6 A váratlan kivétel repónkénti izolációját továbbra is teszt fedi, olyan kiváltó okkal, amely nem a `runs-on` megjelenítésén múlik
+- [x] #1 A kilenc szinten egymásba ágyazott aliasokat tartalmazó workflow-ra a szabály 1 másodpercen belül kézi leletet ad, amely az érték helyén rövid helyettesítő szöveget tartalmaz
+- [x] #2 Ismeretlen YAML-tagú `runs-on` (skalárként és listaelemként is) kézi leletet ad, nem kivételt
+- [x] #3 Önhivatkozó horgonyú `runs-on` kézi leletet ad, nem kivételt
+- [x] #4 A szokásos `runs-on` értékek üzenetei változatlanok: a meglévő `self_hosted_runners` tesztek módosítás nélkül zöldek
+- [x] #5 Ugyanabban a fájlban a hibás job mellett álló többi job értékelése megtörténik
+- [x] #6 A váratlan kivétel repónkénti izolációját továbbra is teszt fedi, olyan kiváltó okkal, amely nem a `runs-on` megjelenítésén múlik
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-37-self-hosted-runners-a-runs-on-ertek-korlatos-meg.
+
+Eltérés a tervtől: a `_json` a `yaml.YAMLError` mellett a `ValueError`, `TypeError` és `AttributeError` kivételt is elkapja (hibás `!!int`/`!!float`/`!!timestamp` érték, nem string kulcs, pl. dátum a JSON-kódolásnál); ezekre is van paraméteres teszt. Az önhivatkozó horgonyt a csomópontszámláló fogja meg (`TOO_LARGE`), a konstruálásig el sem jut.
+Ellenőrzés (2026-11-14): kilencszintű alias-bomba (585 bájt) ideiglenes, repón kívüli szkripttel `MemoryWorkspace`-ben: 0,006 s, kézi lelet `(too large to show)` szöveggel, a b job is megkapta a saját leletét. `pytest -k self_hosted --no-cov`: 142 passed; `tests/test_engine.py`: 74 passed; `uv run ruff format -q . && task verify`: exit 0, 658 passed, 1 skipped, lefedettség 99,27%.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A `runs-on` érték megjelenítése (`_json`, `src/github_manager/rules/workflows.py`) korlátos és kivételmentes lett. Az új `_exceeds_shown_nodes` aliasokat kifejtve, memoizálás nélkül számolja a csomópontokat, és `MAX_SHOWN_NODES = 50` felett azonnal megáll; ilyenkor a lelet `(too large to show)` szöveget kap. Ez kezeli az alias-bombát és az önhivatkozó horgonyt. A konstruálási és JSON-kódolási hibák (ismeretlen tag, hibás `!!int`/`!!timestamp`, nem string kulcs) helyén `(cannot be shown)` áll. A szokásos értékek üzenete változatlan.
+
+Tesztek: paraméteres teszt a `tests/test_rules_workflows.py`-ban (hatszintű bomba, `!foo bar`, `[!foo bar]`, hibás tagek, dátumkulcs, `&r {x: *r}`); mindegyikben a második job is megkapja a leletét. A `tests/test_engine.py` hibaizolációs tesztje mostantól egy `RuntimeError`-t dobó `ExplodingRule`-ra épül.
+
+Ellenőrzés: a kilencszintű bomba 0,006 s alatt kézi leletet ad; `task verify` zöld (658 passed, 1 skipped, 99,27%).
+
+Kockázat: egy jogos, 50 csomópontnál nagyobb `runs-on` is helyettesítő szöveget kap, de a lelet így is megnevezi a jobot.
+<!-- SECTION:FINAL_SUMMARY:END -->
