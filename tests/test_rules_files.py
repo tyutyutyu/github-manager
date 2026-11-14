@@ -67,6 +67,84 @@ def test_required_lines_custom_comment_and_final_newline(make_workspace) -> None
     assert workspace.files["f"] == block + "\n"
 
 
+ENDINGS = pytest.mark.parametrize("ending", ["\n", "\r\n"])
+
+
+def block_lines(ending: str) -> str:
+    return BLOCK.replace("\n", ending)
+
+
+@ENDINGS
+def test_required_lines_appends_block_with_file_line_ending(make_workspace, ending) -> None:
+    before = f"a{ending}b{ending}"
+    workspace = make_workspace({".gitignore": before})
+    findings = required_lines().apply(workspace)
+    assert findings == [Finding("gi", ".gitignore: managed block is missing")]
+    assert workspace.files[".gitignore"] == before + ending + block_lines(ending)
+
+
+@ENDINGS
+def test_required_lines_compliant_file_keeps_line_endings(make_workspace, ending) -> None:
+    text = f"dist/{ending}{ending}" + block_lines(ending)
+    workspace = make_workspace({".gitignore": text})
+    assert required_lines().apply(workspace) == []
+    assert workspace.files == {".gitignore": text}
+
+
+def test_required_lines_compliant_mixed_file_is_untouched(make_workspace) -> None:
+    text = f"a\r\nb\n{BEGIN}\r\n.env\n.idea/\r\n{END}\n"
+    workspace = make_workspace({".gitignore": text})
+    assert required_lines().apply(workspace) == []
+    assert workspace.files == {".gitignore": text}
+
+
+@ENDINGS
+def test_required_lines_outdated_block_changes_only_block(make_workspace, ending) -> None:
+    text = f"a{ending}{BEGIN}{ending}old{ending}{END}{ending}b{ending}"
+    workspace = make_workspace({".gitignore": text})
+    findings = required_lines().apply(workspace)
+    assert findings == [Finding("gi", ".gitignore: managed block is outdated")]
+    assert workspace.files[".gitignore"] == f"a{ending}{block_lines(ending)}b{ending}"
+
+
+@ENDINGS
+def test_required_lines_removes_only_unwanted_line(make_workspace, ending) -> None:
+    text = f"x/{ending}.claude/{ending}" + block_lines(ending)
+    workspace = make_workspace({".gitignore": text})
+    findings = required_lines(remove_lines=[".claude/"]).apply(workspace)
+    assert findings == [Finding("gi", ".gitignore: unwanted lines: .claude/")]
+    assert workspace.files[".gitignore"] == f"x/{ending}" + block_lines(ending)
+
+
+@pytest.mark.parametrize(
+    ("before", "ending"),
+    [
+        ("a\r\nb\r\nc\n", "\r\n"),
+        ("a\r\nb\nc\n", "\n"),
+        ("a\r\nb\n", "\n"),
+    ],
+)
+def test_required_lines_mixed_file_uses_dominant_ending(make_workspace, before, ending) -> None:
+    workspace = make_workspace({".gitignore": before})
+    required_lines().apply(workspace)
+    assert workspace.files[".gitignore"] == before + ending + block_lines(ending)
+
+
+def test_required_lines_empty_file_uses_lf(make_workspace) -> None:
+    workspace = make_workspace({".gitignore": ""})
+    required_lines().apply(workspace)
+    assert workspace.files[".gitignore"] == BLOCK
+
+
+@ENDINGS
+def test_required_lines_adds_missing_final_newline_with_file_ending(make_workspace, ending) -> None:
+    text = block_lines(ending).removesuffix(ending)
+    workspace = make_workspace({".gitignore": text})
+    findings = required_lines().apply(workspace)
+    assert findings == [Finding("gi", ".gitignore: missing final newline")]
+    assert workspace.files[".gitignore"] == text + ending
+
+
 @pytest.mark.parametrize(
     "text",
     [f"{BEGIN}\n.env\n", f"{END}\n{BEGIN}\n", f"{BEGIN}\n{END}\n{BEGIN}\n{END}\n"],

@@ -131,6 +131,12 @@ class Options:
             raise ValueError(f"unknown keys: {', '.join(sorted(self._raw))}")
 
 
+def line_ending(text: str) -> str:
+    """Return the dominant line ending of `text`: CRLF when it ends more lines than bare LF."""
+    crlf = text.count("\r\n")
+    return "\r\n" if crlf > text.count("\n") - crlf else "\n"
+
+
 @dataclass(frozen=True, kw_only=True)
 class Rule(ABC):
     type_name: ClassVar[str]
