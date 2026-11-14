@@ -381,11 +381,11 @@ gh secret set GH_MANAGER_APP_PRIVATE_KEY --repo tyutyutyu/github-manager < priva
 The compliance pull requests opened after the switch are authored by the App bot
 (`<app>[bot]`); already open pull requests keep their author.
 
-Rolling back: the former personal access token secrets (`GH_MANAGER_TOKEN`,
-`GH_MANAGER_ORG_TOKEN`) stay until they are retired in a separate task. Until then,
-revert the workflow change (`git revert` of the commit that introduced the App token
-step) to run with the personal access tokens again; after the secrets are deleted, a
-new fine-grained personal access token per owner is the way back.
+Rolling back: the personal access token secrets have been retired, so the workflow
+no longer has a fallback. If the App cannot be used, issue a new fine-grained personal
+access token per owner (Contents, Pull requests, Workflows and Administration write,
+Metadata read, on all repositories of that owner), store it as a repository secret and
+point the `GH_TOKEN` of the `enforce` job at it instead of the App token step.
 
 Without Administration access, a setting GitHub does not return is reported as *manual*
 ("not readable"); one it does return cannot be changed, and `fix` reports the repository
