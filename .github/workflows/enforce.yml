@@ -1,13 +1,9 @@
 name: enforce
 
 # Applies the central rules to every repository of each owner, one job per owner.
-# A fine-grained personal access token covers a single resource owner, so every owner
-# has its own secret, each for "All repositories" with Contents: read/write,
-# Pull requests: read/write, Administration: read/write (for repo_settings),
-# Workflows: read/write (for self_hosted_runners, which rewrites .github/workflows)
-# and Metadata: read:
-#   tyutyutyu      -> GH_MANAGER_TOKEN
-#   tyutyutyu-org  -> GH_MANAGER_ORG_TOKEN
+# One GitHub App with an installation per owner issues a short-lived installation
+# token in every job (the key is the GH_MANAGER_APP_PRIVATE_KEY secret, the client ID
+# the GH_MANAGER_APP_CLIENT_ID repository variable). See "Tokens" in the README.
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -40,17 +36,21 @@ jobs:
       matrix:
         include:
           - owner: tyutyutyu
-            secret: GH_MANAGER_TOKEN
           - owner: tyutyutyu-org
-            secret: GH_MANAGER_ORG_TOKEN
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_MANAGER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_MANAGER_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
       - name: Apply rules
         env:
-          GH_TOKEN: ${{ secrets[matrix.secret] }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OWNER: ${{ matrix.owner }}
           MODE: ${{ inputs.mode || 'fix' }}
           REPO: ${{ inputs.repo }}

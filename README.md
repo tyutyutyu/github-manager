@@ -352,53 +352,50 @@ with `ghs_` is a GitHub App installation token, and the repositories come from
 Every other token (personal access token, `gh` CLI) lists through `GET /user/repos` or
 `GET /orgs/{owner}/repos`. An installation token can be supplied as `GH_TOKEN`.
 
-A fine-grained personal access token covers a single resource owner, so every entry in
-`owners` needs its own token, stored as an Actions secret of this repository:
+The `enforce` workflow uses one public GitHub App with one installation per owner
+(`tyutyutyu` user, `tyutyutyu-org` organization). Every job issues a short-lived
+installation token (valid for one hour, revoked at the end of the job) with
+`actions/create-github-app-token` and passes it as `GH_TOKEN`. No token has to be renewed.
 
-| Owner | Secret name | Suggested token name |
+App repository permissions:
+
+| Permission | Access | Needed for |
 | --- | --- | --- |
-| `tyutyutyu` (user) | `GH_MANAGER_TOKEN` | `github-manager (tyutyutyu)` |
-| `tyutyutyu-org` (organization) | `GH_MANAGER_ORG_TOKEN` | `github-manager (tyutyutyu-org)` |
+| Contents | Read and write | reading files, creating the compliance branch and commit |
+| Pull requests | Read and write | opening, updating and closing the pull request |
+| Administration | Read and write | `repo_settings` (e.g. `delete_branch_on_merge`) and `repo_ruleset` (reading and writing repository rulesets) |
+| Metadata | Read-only | always required (selected automatically) |
+| Workflows | Read and write | `self_hosted_runners` (rewriting the files under `.github/workflows`) |
 
-Create each one under *Settings → Developer settings → Personal access tokens →
-Fine-grained tokens → Generate new token*:
+Installation: install the App on every owner with *All repositories* (new repositories
+are covered automatically). The App is public, so it can be installed on both the user
+and the organization; the private key never leaves the secret.
 
-- **Resource owner:** the owner from the table.
-- **Repository access:** *All repositories* (new repositories are covered automatically).
-- **Repository permissions:**
-
-  | Permission | Access | Needed for |
-  | --- | --- | --- |
-  | Contents | Read and write | reading files, creating the compliance branch and commit |
-  | Pull requests | Read and write | opening, updating and closing the pull request |
-  | Administration | Read and write | `repo_settings` (e.g. `delete_branch_on_merge`) and `repo_ruleset` (reading and writing repository rulesets) |
-  | Metadata | Read-only | always required (selected automatically) |
-  | Workflows | Read and write | `self_hosted_runners` (rewriting the files under `.github/workflows`) |
-
-- **Expiration:** pick a date and renew the token before it expires; an expired token
-  makes that owner's job fail with HTTP 401.
-
-For the organization, fine-grained tokens must be allowed (*Organization settings →
-Personal access tokens*); if the organization requires approval, the token only works
-once an owner approves it.
-
-Store the tokens (the command prompts for the value):
+Configuration of this repository (the client ID is not a secret):
 
 ```bash
-gh secret set GH_MANAGER_TOKEN --repo tyutyutyu/github-manager
-gh secret set GH_MANAGER_ORG_TOKEN --repo tyutyutyu/github-manager
+gh variable set GH_MANAGER_APP_CLIENT_ID --repo tyutyutyu/github-manager --body <client-id>
+gh secret set GH_MANAGER_APP_PRIVATE_KEY --repo tyutyutyu/github-manager < private-key.pem
 ```
+
+The compliance pull requests opened after the switch are authored by the App bot
+(`<app>[bot]`); already open pull requests keep their author.
+
+Rolling back: the former personal access token secrets (`GH_MANAGER_TOKEN`,
+`GH_MANAGER_ORG_TOKEN`) stay until they are retired in a separate task. Until then,
+revert the workflow change (`git revert` of the commit that introduced the App token
+step) to run with the personal access tokens again; after the secrets are deleted, a
+new fine-grained personal access token per owner is the way back.
 
 Without Administration access, a setting GitHub does not return is reported as *manual*
 ("not readable"); one it does return cannot be changed, and `fix` reports the repository
 as an error (HTTP 403).
 
-Adding an owner: add it to `owners`, create its token, store it under a new secret name,
-and add an `owner`/`secret` pair to the job matrix in
-[.github/workflows/enforce.yml](.github/workflows/enforce.yml).
+Adding an owner: add it to `owners`, install the App on it, and add an `owner` entry to
+the job matrix in [.github/workflows/enforce.yml](.github/workflows/enforce.yml).
 
-Running locally: `GH_TOKEN` can hold one of these tokens (then use `-o` to limit the run
-to its owner), or the `gh` CLI login is used, which works when your account has admin
+Running locally: `GH_TOKEN` can hold an installation token or a personal access token
+(then use `-o` to limit the run to its owner), or the `gh` CLI login is used, which works when your account has admin
 rights on the repositories.
 
 ## Development
