@@ -64,6 +64,37 @@ def test_renovate_adds_missing_extends_by_reserializing(make_workspace) -> None:
     )
 
 
+def assert_no_bare_lf(text: str) -> None:
+    assert "\n" not in text.replace("\r\n", "")
+
+
+def test_renovate_multiline_extends_keeps_crlf(make_workspace) -> None:
+    text = '{\r\n  "extends": [\r\n    "config:recommended",\r\n    "a"\r\n  ]\r\n}\r\n'
+    workspace = make_workspace({"renovate.json": text})
+    renovate().apply(workspace)
+    after = workspace.files["renovate.json"]
+    assert after == text.replace("config:recommended", PRESET)
+    assert_no_bare_lf(after)
+
+
+def test_renovate_inline_extends_keeps_crlf(make_workspace) -> None:
+    text = '{\r\n  "extends": ["config:recommended"]\r\n}\r\n'
+    workspace = make_workspace({"renovate.json": text})
+    renovate().apply(workspace)
+    after = workspace.files["renovate.json"]
+    assert after == text.replace("config:recommended", PRESET)
+    assert_no_bare_lf(after)
+
+
+def test_renovate_reserializing_keeps_crlf(make_workspace) -> None:
+    workspace = make_workspace({"renovate.json": '{\r\n  "automerge": true\r\n}\r\n'})
+    renovate().apply(workspace)
+    after = workspace.files["renovate.json"]
+    assert json.loads(after) == {"automerge": True, "extends": [PRESET]}
+    assert "\r\n" in after
+    assert_no_bare_lf(after)
+
+
 @pytest.mark.parametrize(
     ("files", "message"),
     [

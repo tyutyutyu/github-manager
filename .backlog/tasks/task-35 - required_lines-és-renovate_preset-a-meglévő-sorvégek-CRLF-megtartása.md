@@ -1,9 +1,10 @@
 ---
 id: TASK-35
 title: 'required_lines és renovate_preset: a meglévő sorvégek (CRLF) megtartása'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-12T23:54:00Z'
+updated_date: '2026-11-14T00:38:00Z'
 labels: []
 dependencies: []
 references:
@@ -80,17 +81,31 @@ A `required_lines` és a `renovate_preset` szabály a fájl meglévő sorait bá
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 CRLF sorvégű fájlban a `required_lines` a blokkot CRLF-fel írja, és a blokkon kívüli sorok bájtra változatlanok
-- [ ] #2 Olyan fájlra, amely a sorvégektől eltekintve megfelel (helyes blokk, nincs törlendő sor, van záró sorvég), a `required_lines` nem ad leletet és nem ír — CRLF és kevert sorvég mellett sem
-- [ ] #3 Kevert sorvégű fájlban az érintetlen sorok megtartják a saját sorvégüket; az új sorok az uralkodó sorvéget kapják (döntetlennél és üres fájlnál LF-et)
-- [ ] #4 A `renovate_preset` által átírt CRLF fájlban nem marad csupasz LF: sem a többsoros `extends` tömbben, sem a teljes újraírás tartalék ágán
-- [ ] #5 LF sorvégű fájlokra mindkét szabály kimenete megegyezik a változtatás előttivel: a meglévő tesztek módosítás nélkül zöldek
-- [ ] #6 A README megemlíti, hogy a két szabály megtartja a meglévő sorvégeket
+- [x] #1 CRLF sorvégű fájlban a `required_lines` a blokkot CRLF-fel írja, és a blokkon kívüli sorok bájtra változatlanok
+- [x] #2 Olyan fájlra, amely a sorvégektől eltekintve megfelel (helyes blokk, nincs törlendő sor, van záró sorvég), a `required_lines` nem ad leletet és nem ír — CRLF és kevert sorvég mellett sem
+- [x] #3 Kevert sorvégű fájlban az érintetlen sorok megtartják a saját sorvégüket; az új sorok az uralkodó sorvéget kapják (döntetlennél és üres fájlnál LF-et)
+- [x] #4 A `renovate_preset` által átírt CRLF fájlban nem marad csupasz LF: sem a többsoros `extends` tömbben, sem a teljes újraírás tartalék ágán
+- [x] #5 LF sorvégű fájlokra mindkét szabály kimenete megegyezik a változtatás előttivel: a meglévő tesztek módosítás nélkül zöldek
+- [x] #6 A README megemlíti, hogy a két szabály megtartja a meglévő sorvégeket
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `uv run ruff format -q .` és `task verify` sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
+- [x] #1 `uv run ruff format -q .` és `task verify` sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz kapcsolódó változáson kívüli módosítást, ideiglenes fájlt vagy titkot
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-35-required-lines-es-renovate-preset-a-meglevo-sorv.
+
+Finalization check: targeted tests (-k 'required_lines or renovate') 50 passed; ruff format --check and task verify exit 0 (638 passed, 1 skipped sandbox integration). Task scenarios reproduced: CRLF file gets a CRLF block with untouched lines; compliant CRLF and mixed-ending files give no finding and no write; multiline CRLF extends rewrite has no bare LF. git diff main -- tests contains only additions.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+required_lines and renovate_preset now keep existing line endings. New helper line_ending() in rules/base.py returns CRLF only when CRLF ends more lines than bare LF (LF on ties and empty text). RequiredLines.apply splits with keepends, keeps lines outside the block byte for byte, reuses a current block unchanged, and writes new lines, the separating blank line and a missing final newline with the dominant ending; a pure line-ending difference no longer causes a finding or write. RenovatePreset: _render_array uses CRLF when the old array has it, and the re-serializing fallback converts to the original dominant ending. README documents both. Tests: new LF/CRLF-parametrized and mixed-ending cases; existing tests unchanged. Verification: task verify green (638 passed, 1 skipped, 99% coverage). Risk: mixed-ending files are no longer normalized to LF (intentional).
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from github_manager.rules.base import REQUIRED, Finding, FindingKind, Options, Rule, Workspace
+from github_manager.rules.base import (
+    REQUIRED,
+    Finding,
+    FindingKind,
+    Options,
+    Rule,
+    Workspace,
+    line_ending,
+)
 
 RENOVATE_CONFIG_FILES = (
     "renovate.json",
@@ -102,7 +110,8 @@ def _rewrite_extends(text: str, config: dict[str, Any]) -> str:
             if json.loads(candidate) == config:
                 return candidate
     indent = re.search(r"^( +)\S", text, re.MULTILINE)
-    return json.dumps(config, indent=len(indent.group(1)) if indent else 2) + "\n"
+    rendered = json.dumps(config, indent=len(indent.group(1)) if indent else 2) + "\n"
+    return rendered.replace("\n", line_ending(text))
 
 
 def _render_array(items: list[str], old_array: str, text: str, start: int) -> str:
@@ -113,5 +122,6 @@ def _render_array(items: list[str], old_array: str, text: str, start: int) -> st
     line_start = text.rfind("\n", 0, start) + 1
     line = text[line_start:start]
     close_indent = line[: len(line) - len(line.lstrip(" \t"))]
-    body = ",\n".join(item_indent.group(1) + item for item in rendered)
-    return f"[\n{body}\n{close_indent}]"
+    newline = "\r\n" if "\r\n" in old_array else "\n"
+    body = f",{newline}".join(item_indent.group(1) + item for item in rendered)
+    return f"[{newline}{body}{newline}{close_indent}]"

@@ -102,7 +102,8 @@ error.
 | `remove_lines` | list of strings | no | `[]` | lines that must not appear |
 | `comment` | string | no | `#` | comment prefix of the block markers |
 
-**Fix:** replaces or appends the block, deletes the `remove_lines`.
+**Fix:** replaces or appends the block, deletes the `remove_lines`; existing lines keep
+their line endings (LF or CRLF), new lines get the file's dominant one.
 
 **Reported as manual:** `path` has malformed managed block markers (a duplicated begin or
 end marker, a marker without its pair, or an end marker before the begin marker); the file
@@ -119,8 +120,8 @@ is left unchanged.
 | `preset` | string | yes | | preset that must be extended |
 | `remove_extends` | list of strings | no | `[]` | entries dropped from `extends` |
 
-**Fix:** rewrites only the `extends` array (drops `remove_extends`), or creates
-`renovate.json`.
+**Fix:** rewrites only the `extends` array (drops `remove_extends`), keeping the file's
+line endings (LF or CRLF), or creates `renovate.json`.
 
 **Reported as manual:** several Renovate configs in one repo, invalid JSON, `.json5`
 configs.

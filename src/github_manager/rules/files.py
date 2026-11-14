@@ -5,7 +5,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from github_manager.rules.base import REQUIRED, Finding, FindingKind, Options, Rule, Workspace
+from github_manager.rules.base import (
+    REQUIRED,
+    Finding,
+    FindingKind,
+    Options,
+    Rule,
+    Workspace,
+    line_ending,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -45,7 +53,8 @@ class RequiredLines(Rule):
 
     def apply(self, workspace: Workspace) -> list[Finding]:
         content = workspace.read(self.path) or ""
-        current = content.splitlines()
+        newline = line_ending(content)
+        current = content.splitlines(keepends=True)
         stripped = [line.strip() for line in current]
         begins = [i for i, line in enumerate(stripped) if line == self.begin_marker]
         ends = [i for i, line in enumerate(stripped) if line == self.end_marker]
@@ -57,14 +66,18 @@ class RequiredLines(Rule):
         unwanted = {line.strip() for line in self.remove_lines}
         if begins:
             before, after = current[: begins[0]], current[ends[0] + 1 :]
+            old_block = current[begins[0] : ends[0] + 1]
         else:
-            before, after = current, []
+            before, after, old_block = current, [], []
+        block_is_current = [line.rstrip("\r\n") for line in old_block] == block
+        new_block = old_block if block_is_current else [line + newline for line in block]
         before = [line for line in before if line.strip() not in unwanted]
         after = [line for line in after if line.strip() not in unwanted]
         removed = [line for line in current if line.strip() in unwanted]
         if not begins and before and before[-1].strip():
-            before.append("")
-        result = "\n".join([*before, *block, *after]) + "\n"
+            before.append(newline)
+        lines = [*before, *new_block, *after]
+        result = "".join(line if line.endswith(("\n", "\r")) else line + newline for line in lines)
         if result == content:
             return []
 
@@ -72,7 +85,7 @@ class RequiredLines(Rule):
         changes = []
         if not begins:
             changes.append("managed block is missing")
-        elif current[begins[0] : ends[0] + 1] != block:
+        elif not block_is_current:
             changes.append("managed block is outdated")
         if removed:
             changes.append(f"unwanted lines: {', '.join(line.strip() for line in removed)}")
