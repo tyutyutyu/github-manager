@@ -26,6 +26,7 @@ class FakeHttp:
     """Records requests and replays queued responses or network errors."""
 
     def __init__(self) -> None:
+        self.token = "secret"  # noqa: S105
         self.requests: list[tuple[str, str, object]] = []
         self.responses: list[tuple[int, object, str, dict[str, str]] | BaseException] = []
 
@@ -47,7 +48,7 @@ class FakeHttp:
         data = request.data
         body = json.loads(data) if isinstance(data, bytes) else None
         self.requests.append((request.get_method(), request.full_url, body))
-        assert request.get_header("Authorization") == "Bearer secret"
+        assert request.get_header("Authorization") == f"Bearer {self.token}"
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
@@ -117,6 +118,30 @@ def test_list_repos_for_organization(http: FakeHttp, client: GitHub) -> None:
     http.queue({"login": "me"}).queue([])
     assert client.list_repos("org") == []
     assert http.requests[1][1] == f"{API}/orgs/org/repos?type=all&per_page=100"
+
+
+def test_list_repos_with_installation_token_uses_installation_endpoint(
+    http: FakeHttp, fake_time: FakeTime
+) -> None:
+    http.token = "ghs_x"  # noqa: S105
+    installation = GitHub("ghs_x", opener=http, sleep=fake_time.sleep, clock=fake_time.clock)
+    repo = {"default_branch": "main", "fork": False}
+    first = {**repo, "name": "a", "full_name": "Me/a", "archived": False}
+    second = {**repo, "name": "b", "full_name": "me/b", "archived": True}
+    other = {**repo, "name": "c", "full_name": "org/c", "archived": False}
+    http.queue(
+        {"total_count": 3, "repositories": [first]},
+        link=f'<{API}/installation/repositories?page=2>; rel="next"',
+    )
+    http.queue({"total_count": 3, "repositories": [second, other]})
+
+    repos = installation.list_repos("me")
+
+    assert [(r.name, r.archived) for r in repos] == [("a", False), ("b", True)]
+    assert [url for _, url, _ in http.requests] == [
+        f"{API}/installation/repositories?per_page=100",
+        f"{API}/installation/repositories?page=2",
+    ]
 
 
 def test_pagination_never_sends_the_token_elsewhere(http: FakeHttp, client: GitHub) -> None:

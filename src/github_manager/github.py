@@ -23,6 +23,10 @@ MAX_ATTEMPTS = 3
 BACKOFF_SECONDS = 1  # wait after the k-th failed attempt: BACKOFF_SECONDS * 2 ** (k - 1)
 SECONDARY_LIMIT_WAIT_SECONDS = 60
 MAX_RATE_LIMIT_WAIT_SECONDS = 120
+# Installation access tokens (GitHub App) start with this prefix; the user endpoints
+# (`GET /user`, `GET /user/repos`) reject them. Personal access tokens and `gh` OAuth
+# tokens use other prefixes (`github_pat_`, `ghp_`, `gho_`).
+INSTALLATION_TOKEN_PREFIX = "ghs_"  # noqa: S105 - a public prefix, not a secret
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
 
 logger = logging.getLogger(__name__)
@@ -221,12 +225,13 @@ class GitHub:
     def call(self, method: str, path: str, body: Any = None) -> Any:
         return self._request(method, path, body)[0]
 
-    def paginate(self, path: str) -> list[Any]:
+    def paginate(self, path: str, key: str | None = None) -> list[Any]:
+        """All pages of a list endpoint; `key` names the array of a wrapped page."""
         items: list[Any] = []
         url: str | None = path
         while url:
             page, link = self._request("GET", url)
-            items.extend(page)
+            items.extend(page if key is None else page[key])
             match = re.search(r'<([^>]+)>;\s*rel="next"', link)
             url = match.group(1) if match else None
         return items
@@ -241,8 +246,14 @@ class GitHub:
     # --- repositories ------------------------------------------------------
 
     def list_repos(self, owner: str) -> list[Repo]:
-        login = self.call("GET", "/user")["login"]
-        if login.lower() == owner.lower():
+        if self._token.startswith(INSTALLATION_TOKEN_PREFIX):
+            prefix = f"{owner.lower()}/"
+            raw = [
+                item
+                for item in self.paginate("/installation/repositories?per_page=100", "repositories")
+                if item["full_name"].lower().startswith(prefix)
+            ]
+        elif self.call("GET", "/user")["login"].lower() == owner.lower():
             raw = self.paginate("/user/repos?affiliation=owner&per_page=100")
         else:
             raw = self.paginate(f"/orgs/{_q(owner)}/repos?type=all&per_page=100")
