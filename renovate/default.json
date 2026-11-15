@@ -5,6 +5,7 @@
   "configMigration": true,
   "baseBranchPatterns": ["main"],
   "rangeStrategy": "pin",
+  "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
       "description": "Wait before proposing a new release (supply chain protection)",
