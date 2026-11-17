@@ -11,7 +11,7 @@ from http.client import IncompleteRead
 import pytest
 
 from github_manager import github
-from github_manager.github import GitHub, GitHubError, resolve_token
+from github_manager.github import GitHub, GitHubError, owner_tokens_from_env, resolve_token
 
 API = "https://api.github.com"
 
@@ -162,6 +162,95 @@ def test_read_file(http: FakeHttp, client: GitHub) -> None:
 
     http.queue({"message": "Not Found"}, status=404)
     assert client.read_file("me/a", "x", "abc") is None
+
+
+def test_read_default_file_uses_the_default_branch(http: FakeHttp, client: GitHub) -> None:
+    http.queue(encoded("schema\n"))
+    assert client.read_default_file("other/a", "dir/s.json") == "schema\n"
+    assert http.requests[0][1] == f"{API}/repos/other/a/contents/dir/s.json"
+
+    http.queue({"message": "Not Found"}, status=404)
+    assert client.read_default_file("other/a", "x") is None
+
+
+def test_read_default_file_uses_the_owner_token(http: FakeHttp, fake_time: FakeTime) -> None:
+    client = GitHub(
+        "secret",
+        opener=http,
+        sleep=fake_time.sleep,
+        clock=fake_time.clock,
+        owner_tokens={"Other-Org": "other-token"},
+    )
+    http.token = "other-token"  # noqa: S105
+    http.queue(encoded("a"))
+    assert client.read_default_file("other-org/x", "f") == "a"
+
+    http.token = "secret"  # noqa: S105
+    http.queue(encoded("b"))
+    assert client.read_default_file("mine/x", "f") == "b"
+    http.queue(encoded("c"))
+    assert client.read_file("other-org/x", "f", "abc") == "c"
+
+
+def test_read_default_file_does_not_leak_the_token(http: FakeHttp, fake_time: FakeTime) -> None:
+    client = GitHub(
+        "secret", opener=http, sleep=fake_time.sleep, owner_tokens={"other": "other-token"}
+    )
+    http.token = "other-token"  # noqa: S105
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "Server Error"}, status=500)
+    with pytest.raises(GitHubError) as raised:
+        client.read_default_file("other/x", "f")
+    assert "other-token" not in str(raised.value)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_read_default_file_returns_none_without_access(
+    http: FakeHttp, client: GitHub, status: int
+) -> None:
+    http.queue({"message": "Resource not accessible by integration"}, status=status)
+    assert client.read_default_file("other/x", "f") is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"type": "file", "encoding": "none", "content": ""},
+        {"type": "file", "encoding": "base64", "content": "/w=="},
+    ],
+)
+def test_read_default_file_returns_none_for_unreadable_content(
+    http: FakeHttp, client: GitHub, payload
+) -> None:
+    http.queue(payload)
+    assert client.read_default_file("other/x", "f") is None
+
+
+def test_read_default_file_still_raises_on_a_rate_limit(
+    http: FakeHttp, fake_time: FakeTime
+) -> None:
+    client = GitHub("secret", opener=http, sleep=fake_time.sleep, clock=fake_time.clock)
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "API rate limit exceeded"}, status=429)
+    with pytest.raises(GitHubError, match="rate limit"):
+        client.read_default_file("other/x", "f")
+
+
+def test_owner_tokens_from_env_maps_variable_names_to_owners() -> None:
+    environ = {
+        "GH_READ_TOKEN_TYUTYUTYU_ORG": " t1 ",
+        "GH_READ_TOKEN_ME": "t2",
+        "GH_READ_TOKEN_EMPTY": " ",
+        "GH_READ_TOKEN_": "t3",
+        "GH_TOKEN": "main",
+    }
+    assert owner_tokens_from_env(environ) == {"tyutyutyu-org": "t1", "me": "t2"}
+
+
+def test_owner_tokens_from_env_reads_the_process_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GH_READ_TOKEN_ZZ_TEST", "t")
+    assert owner_tokens_from_env()["zz-test"] == "t"
 
 
 @pytest.mark.parametrize(

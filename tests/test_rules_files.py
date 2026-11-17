@@ -222,6 +222,59 @@ def test_file_sync_requires_existing_source(tmp_path: Path) -> None:
         FileSync.from_options({"id": "ec", "path": "x", "source": "missing"}, tmp_path)
 
 
+def remote_file_sync(**overrides) -> FileSync:
+    options = {
+        "id": "schema",
+        "path": "schema.json",
+        "source": "schemas/s.json",
+        "source_repo": "org/hub",
+        **overrides,
+    }
+    return FileSync.from_options(options, Path("/nonexistent"))
+
+
+def test_file_sync_remote_source_writes_the_template(make_workspace) -> None:
+    rule = remote_file_sync()
+    workspace = make_workspace(other_repos={"org/hub": {"schemas/s.json": "{}\n"}})
+
+    assert rule.apply(workspace) == [Finding("schema", "schema.json: missing")]
+    assert workspace.files["schema.json"] == "{}\n"
+    assert rule.apply(workspace) == []
+
+    workspace.files["schema.json"] = "old"
+    assert rule.apply(workspace) == [Finding("schema", "schema.json: differs from the template")]
+
+
+def test_file_sync_unreadable_remote_source_is_manual_and_writes_nothing(make_workspace) -> None:
+    for others in ({}, {"org/hub": {}}):
+        workspace = make_workspace({"schema.json": "keep"}, other_repos=others)
+        assert remote_file_sync().apply(workspace) == [
+            Finding(
+                "schema",
+                "schema.json: source org/hub:schemas/s.json is not readable",
+                kind=FindingKind.MANUAL,
+            )
+        ]
+        assert workspace.files == {"schema.json": "keep"}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"source_repo": "hub"}, "must be OWNER/NAME"),
+        ({"source_repo": "a/b/c"}, "must be OWNER/NAME"),
+        ({"source_repo": "/hub"}, "must be OWNER/NAME"),
+        ({"source_repo": "org/"}, "must be OWNER/NAME"),
+        ({"source": "/etc/x"}, "must be relative"),
+        ({"source": "a/../b"}, "must be relative"),
+        ({"extra": 1}, "unknown keys: extra"),
+    ],
+)
+def test_file_sync_rejects_invalid_remote_options(overrides, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        remote_file_sync(**overrides)
+
+
 # --- required_files ----------------------------------------------------------
 
 SONAR = ".github/workflows/sonarqube.yml"

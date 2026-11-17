@@ -100,22 +100,46 @@ class FileSync(Rule):
     type_name: ClassVar[str] = "file_sync"
 
     path: str
-    content: str
+    source: str
+    source_repo: str | None = None
+    # The template text of a local source; a remote source is read on every `apply`.
+    content: str | None = None
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
-        source = base_dir / options.text("source", REQUIRED)
-        return cls(
-            path=options.text("path", REQUIRED),
-            content=source.read_text(encoding="utf-8"),
-            **common,
-        )
+        path = options.text("path", REQUIRED)
+        source = options.text("source", REQUIRED)
+        source_repo = options.text("source_repo", None)
+        if source_repo is None:
+            return cls(
+                path=path,
+                source=source,
+                content=(base_dir / source).read_text(encoding="utf-8"),
+                **common,
+            )
+        parts = source_repo.split("/")
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"'source_repo' {source_repo!r} must be OWNER/NAME")
+        if source.startswith("/") or ".." in source.split("/"):
+            raise ValueError(
+                f"'source' {source!r} must be relative and must not contain a '..' segment"
+            )
+        return cls(path=path, source=source, source_repo=source_repo, **common)
+
+    def _template(self, workspace: Workspace) -> str | None:
+        if self.source_repo is None:
+            return self.content
+        return workspace.read_repo_file(self.source_repo, self.source)
 
     def apply(self, workspace: Workspace) -> list[Finding]:
+        template = self._template(workspace)
+        if template is None:
+            message = f"{self.path}: source {self.source_repo}:{self.source} is not readable"
+            return [Finding(self.id, message, kind=FindingKind.MANUAL)]
         current = workspace.read(self.path)
-        if current == self.content:
+        if current == template:
             return []
-        workspace.write(self.path, self.content)
+        workspace.write(self.path, template)
         state = "missing" if current is None else "differs from the template"
         return [Finding(self.id, f"{self.path}: {state}")]
 

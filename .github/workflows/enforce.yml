@@ -48,9 +48,29 @@ jobs:
           client-id: ${{ vars.GH_MANAGER_APP_CLIENT_ID }}
           private-key: ${{ secrets.GH_MANAGER_APP_PRIVATE_KEY }}
           owner: ${{ matrix.owner }}
+      # Read-only tokens for the other owners' repositories (cross-repository file_sync
+      # sources). The step of the job's own owner is skipped, its token is empty.
+      - id: read-tyutyutyu
+        if: matrix.owner != 'tyutyutyu'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_MANAGER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_MANAGER_APP_PRIVATE_KEY }}
+          owner: tyutyutyu
+          permission-contents: read
+      - id: read-tyutyutyu-org
+        if: matrix.owner != 'tyutyutyu-org'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_MANAGER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_MANAGER_APP_PRIVATE_KEY }}
+          owner: tyutyutyu-org
+          permission-contents: read
       - name: Apply rules
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_READ_TOKEN_TYUTYUTYU: ${{ steps.read-tyutyutyu.outputs.token }}
+          GH_READ_TOKEN_TYUTYUTYU_ORG: ${{ steps.read-tyutyutyu-org.outputs.token }}
           OWNER: ${{ matrix.owner }}
           MODE: ${{ inputs.mode || 'fix' }}
           REPO: ${{ inputs.repo }}

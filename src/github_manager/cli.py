@@ -11,8 +11,15 @@ from rich.console import Console
 from rich.text import Text
 
 from github_manager.config import DEFAULT_CONFIG_PATH, ConfigError, load_config
-from github_manager.engine import GitHubApi, Outcome, RepoReport, process_repo, select_repos
-from github_manager.github import GitHub, GitHubError, resolve_token
+from github_manager.engine import (
+    GitHubApi,
+    Outcome,
+    RepoFileCache,
+    RepoReport,
+    process_repo,
+    select_repos,
+)
+from github_manager.github import GitHub, GitHubError, owner_tokens_from_env, resolve_token
 from github_manager.rules import FindingKind
 
 EXIT_OK = 0
@@ -45,7 +52,7 @@ def _console(*, stderr: bool = False) -> Console:
 
 
 def _default_api() -> GitHubApi:
-    return GitHub(resolve_token())
+    return GitHub(resolve_token(), owner_tokens=owner_tokens_from_env())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -108,10 +115,11 @@ def main(argv: Sequence[str] | None = None, api_factory: ApiFactory = _default_a
         return EXIT_OK
 
     fix = args.command == "fix"
+    repo_files = RepoFileCache()
     reports = []
     printed_any = False
     for repo in repos:
-        report = process_repo(api, config, repo, fix=fix)
+        report = process_repo(api, config, repo, fix=fix, repo_files=repo_files)
         reports.append(report)
         if report.outcome is not Outcome.COMPLIANT or args.verbose:
             if printed_any:

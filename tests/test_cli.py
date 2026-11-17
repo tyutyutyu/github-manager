@@ -346,6 +346,28 @@ def test_default_api_uses_resolved_token(monkeypatch) -> None:
     assert cli._default_api() is not None
 
 
+def test_default_api_passes_owner_tokens_from_the_environment(monkeypatch) -> None:
+    captured = {}
+
+    def fake_github(token, **kwargs):
+        captured.update(token=token, **kwargs)
+
+    monkeypatch.setattr(cli, "resolve_token", lambda: "main")
+    monkeypatch.setattr(cli, "GitHub", fake_github)
+    monkeypatch.setenv("GH_READ_TOKEN_MY_ORG", "read")
+    cli._default_api()
+    assert captured["token"] == "main"  # noqa: S105
+    assert captured["owner_tokens"]["my-org"] == "read"
+
+
+def test_token_never_appears_in_output(fake_github, config_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("GH_READ_TOKEN_OWNER", "s3cret-read-token")
+    fake_github.add_repo("bad", {})
+    run(fake_github, config_path, "check", "--diff", "-v")
+    captured = capsys.readouterr()
+    assert "s3cret-read-token" not in captured.out + captured.err
+
+
 AUTO_MERGE_CONFIG = (
     'owners = ["owner"]\nauto_merge = true\n'
     '[[rules]]\nid = "gi"\ntype = "required_lines"\npath = ".gitignore"\nlines = ".env"\n'
