@@ -3,9 +3,10 @@ id: TASK-44
 title: >-
   Repóprofilok: kizáró, névalapú profilok (common, workspace, backlog) és a
   szabályok profilhoz rendelése
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16T23:56:00Z'
+updated_date: '2026-11-17T00:15:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -89,18 +90,32 @@ A konfigurációban profilok definiálhatók repónév-mintákkal, a szabályok 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A felső szintű profiles tábla profilnév → glob-lista párokat fogad; a common név foglalt, az üres lista, az ismétlődő profilnév és a nem string elem config-hiba
-- [ ] #2 Minden szabálytípus elfogad egy profiles listát (alapértelmezés ["common"]); nem definiált profilnév, üres lista vagy ismétlődő elem config-hiba
-- [ ] #3 Egy repó a repónévre vagy OWNER/NAME-re illeszkedő egyetlen profilba kerül, illeszkedés nélkül a common-ba; több illeszkedő profilnál a repó ERROR riportot kap az ütköző profilok nevével, a többi repó feldolgozása folytatódik
-- [ ] #4 Egy repóra csak azok a szabályok futnak, és az auto-merge döntésben csak azok a repo_ruleset szabályok számítanak, amelyek profiles listája tartalmazza a repó profilját
-- [ ] #5 A konzolriport és a step summary minden repónál kiírja a profilt
-- [ ] #6 A github-manager.toml definiálja a workspace (*-workspace) és backlog (*-backlog) profilt; a SonarQube szabályok és a repo-visibility csak common, a többi meglévő szabály mindhárom profilra vonatkozik, és egy profile-visibility szabály mindkét ownerre privátot vár a workspace és backlog profilban
-- [ ] #7 README Profiles szakasza és egy Backlog decision leírja a kizáró, névalapú profilokat
+- [x] #1 A felső szintű profiles tábla profilnév → glob-lista párokat fogad; a common név foglalt, az üres lista, az ismétlődő profilnév és a nem string elem config-hiba
+- [x] #2 Minden szabálytípus elfogad egy profiles listát (alapértelmezés ["common"]); nem definiált profilnév, üres lista vagy ismétlődő elem config-hiba
+- [x] #3 Egy repó a repónévre vagy OWNER/NAME-re illeszkedő egyetlen profilba kerül, illeszkedés nélkül a common-ba; több illeszkedő profilnál a repó ERROR riportot kap az ütköző profilok nevével, a többi repó feldolgozása folytatódik
+- [x] #4 Egy repóra csak azok a szabályok futnak, és az auto-merge döntésben csak azok a repo_ruleset szabályok számítanak, amelyek profiles listája tartalmazza a repó profilját
+- [x] #5 A konzolriport és a step summary minden repónál kiírja a profilt
+- [x] #6 A github-manager.toml definiálja a workspace (*-workspace) és backlog (*-backlog) profilt; a SonarQube szabályok és a repo-visibility csak common, a többi meglévő szabály mindhárom profilra vonatkozik, és egy profile-visibility szabály mindkét ownerre privátot vár a workspace és backlog profilban
+- [x] #7 README Profiles szakasza és egy Backlog decision leírja a kizáró, névalapú profilokat
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . && task verify sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz a feladathoz nem tartozó változást
+- [x] #1 uv run ruff format -q . && task verify sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz a feladathoz nem tartozó változást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-44-repoprofilok-kizaro-nevalapu-profilok-common-wor.
+
+Lezáráskori ellenőrzés: ruff format/check, ty check és pytest zöld (681 passed, 1 skipped, 99,30% coverage); a workflow task verify futása exit 0. uv run github-manager repos betölti a valódi configot. uv run github-manager check -o tyutyutyu --repo zenget-workspace: [workspace] profil, SonarQube és owner szerinti visibility finding nincs. A decision-10 törzse a CLI korlátja miatt üres; a tartalom a korábbi döntések konvenciója szerint a doc-10 ADR dokumentumban van.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Kizáró, névalapú repóprofilok: a felső szintű profiles tábla (név → glob-lista a repónévre és OWNER/NAME-re), a foglalt implicit common profil, és minden szabályon közös profiles kulcs (alapértelmezés ["common"]). A resolve_profile egy helyen sorolja be a repót; ütköző profiloknál a repó ERROR riportot kap az ütköző nevekkel, a futás folytatódik. A szabályok kiértékelése és az auto-merge döntés (_verify_required) csak a repó profiljának szabályait nézi. A konzolriport és a step summary kiírja a profilt. A github-manager.toml definiálja a workspace és backlog profilt, a SonarQube szabályok és a repo-visibility common-only, a többi szabály mindhárom profilra vonatkozik, és új profile-visibility szabály vár privátot. README Profiles szakasz, decision-10 + doc-10 ADR. Ellenőrzés: task verify exit 0, 681 teszt zöld, 99,30% coverage; valódi config betölthető; zenget-workspace check [workspace] profilt mutat SonarQube/visibility finding nélkül. Kockázat: -workspace/-backlog végű meglévő repó profilt vált (a riport jelzi, exclude-dal kizárható).
+<!-- SECTION:FINAL_SUMMARY:END -->

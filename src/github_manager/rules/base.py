@@ -61,6 +61,8 @@ class Finding:
 
 
 REQUIRED = object()
+# The implicit profile of every repository that no defined profile matches.
+COMMON_PROFILE = "common"
 
 
 class Options:
@@ -131,6 +133,16 @@ class Options:
             raise ValueError(f"unknown keys: {', '.join(sorted(self._raw))}")
 
 
+def _profile_names(options: Options) -> list[str]:
+    names = options.text_list("profiles", [COMMON_PROFILE])
+    if not names:
+        raise ValueError("'profiles' must not be empty")
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate profiles: {', '.join(duplicates)}")
+    return names
+
+
 def line_ending(text: str) -> str:
     """Return the dominant line ending of `text`: CRLF when it ends more lines than bare LF."""
     crlf = text.count("\r\n")
@@ -143,6 +155,7 @@ class Rule(ABC):
 
     id: str
     exclude: list[str] = field(default_factory=list)
+    profiles: list[str] = field(default_factory=lambda: [COMMON_PROFILE])
 
     def applies_to(self, repo_name: str, full_name: str | None = None) -> bool:
         names = [repo_name] if full_name is None else [repo_name, full_name]
@@ -160,6 +173,7 @@ class Rule(ABC):
             base_dir,
             id=options.text("id", REQUIRED),
             exclude=options.text_list("exclude", []),
+            profiles=_profile_names(options),
         )
         options.finish()
         return rule

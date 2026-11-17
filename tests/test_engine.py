@@ -1193,3 +1193,91 @@ def test_repo_report_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         report.outcome = Outcome.ERROR  # ty: ignore[invalid-assignment]
+
+
+def profile_rule(rule_id: str, *profiles: str) -> RequiredLines:
+    return RequiredLines.from_options(
+        {"id": rule_id, "path": ".gitignore", "lines": ".env", "profiles": list(profiles)},
+        Path(),
+    )
+
+
+PROFILES = {"workspace": ["*-workspace"], "backlog": ["owner/*-backlog"]}
+PROFILE_CONFIG = Config(
+    owners=["owner"],
+    rules=[
+        profile_rule("only-common", "common"),
+        profile_rule("only-workspace", "workspace"),
+    ],
+    profiles=PROFILES,
+)
+
+
+def finding_ids(report: RepoReport) -> list[str]:
+    return [finding.rule_id for finding in report.findings]
+
+
+@pytest.mark.parametrize(
+    ("name", "profile"),
+    [("x-workspace", "workspace"), ("x-backlog", "backlog"), ("plain", "common")],
+)
+def test_repository_profile_follows_name_and_full_name(fake_github, name, profile) -> None:
+    fake_github.add_repo(name, {})
+
+    report = process_repo(fake_github, PROFILE_CONFIG, repo_named(fake_github, name), fix=False)
+
+    assert report.profile == profile
+
+
+def test_rules_run_only_on_repositories_of_their_profile(fake_github) -> None:
+    fake_github.add_repo("x-workspace", {})
+    fake_github.add_repo("plain", {})
+
+    workspace = process_repo(
+        fake_github, PROFILE_CONFIG, repo_named(fake_github, "x-workspace"), fix=False
+    )
+    common = process_repo(fake_github, PROFILE_CONFIG, repo_named(fake_github, "plain"), fix=False)
+
+    assert finding_ids(workspace) == ["only-workspace"]
+    assert finding_ids(common) == ["only-common"]
+
+
+def test_conflicting_profiles_are_an_error_and_other_repositories_continue(fake_github) -> None:
+    fake_github.add_repo("x-backlog-workspace", {})
+    fake_github.add_repo("-backlog", {})
+    config = replace(PROFILE_CONFIG, profiles={**PROFILES, "backlog": ["*-backlog*"]})
+
+    conflict = process_repo(
+        fake_github, config, repo_named(fake_github, "x-backlog-workspace"), fix=True
+    )
+    other = process_repo(fake_github, config, repo_named(fake_github, "-backlog"), fix=False)
+
+    assert conflict.outcome is Outcome.ERROR
+    assert "backlog, workspace" in conflict.detail
+    assert conflict.profile == "backlog, workspace"
+    assert other.outcome is Outcome.COMPLIANT
+    assert other.profile == "backlog"
+
+
+def test_auto_merge_counts_only_rulesets_of_the_repository_profile(fake_github) -> None:
+    ruleset = replace(VERIFY_RULE, profiles=["workspace"])
+    config = Config(
+        owners=["owner"],
+        rules=[profile_rule("gi", "common", "workspace"), SETTINGS_RULE, ruleset],
+        profiles={"workspace": ["*-workspace"]},
+        auto_merge=True,
+    )
+    for name in ("app-workspace", "app"):
+        fake_github.add_repo(
+            name,
+            {VERIFY_PATH: VERIFY_WORKFLOW},
+            settings={"delete_branch_on_merge": False},
+        )
+
+    workspace = process_repo(
+        fake_github, config, repo_named(fake_github, "app-workspace"), fix=True
+    )
+    common = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+
+    assert workspace.auto_merge == "enabled (squash)"
+    assert common.auto_merge == VERIFY_NOT_REQUIRED

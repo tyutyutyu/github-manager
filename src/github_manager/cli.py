@@ -137,6 +137,7 @@ def _print_report(console: Console, report: RepoReport, *, show_diff: bool) -> N
     header = Text.assemble(
         (symbol, style), " ", (report.repo, "bold"), "  ", (report.outcome, style)
     )
+    header.append(f"  [{report.profile}]", style="dim")
     if report.detail:
         header.append(f"  {report.detail}", style="dim")
     console.print(header)
@@ -193,13 +194,15 @@ def _write_step_summary(reports: list[RepoReport]) -> None:
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if not target:
         return
-    lines = ["| Repository | Result | Auto-merge | Findings |", "| --- | --- | --- | --- |"]
+    lines = [
+        "| Repository | Profile | Result | Auto-merge | Findings |",
+        "| --- | --- | --- | --- | --- |",
+    ]
     for report in reports:
         findings = "<br>".join(f"{f.rule_id}: {f.message}" for f in report.findings)
         result = f"{report.outcome} {report.detail}".strip()
-        lines.append(
-            f"| {report.repo} | {result} | {_cell(report.auto_merge)} | {_cell(findings)} |"
-        )
+        row = [report.repo, report.profile, result, report.auto_merge, findings]
+        lines.append("| " + " | ".join(_cell(value) for value in row) + " |")
     with Path(target).open("a", encoding="utf-8") as summary:
         summary.write("\n".join(lines) + "\n")
 

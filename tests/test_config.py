@@ -113,3 +113,53 @@ def test_missing_and_malformed_files(tmp_path: Path) -> None:
     broken.write_text("owner = ")
     with pytest.raises(ConfigError, match="invalid TOML"):
         load_config(broken)
+
+
+def with_profiles(profiles, rules=RULES) -> dict:
+    return {"owners": ["me"], "rules": rules, "profiles": profiles}
+
+
+@pytest.mark.parametrize(
+    ("profiles", "message"),
+    [
+        ({"common": ["*"]}, "'common' is reserved"),
+        ({"Common": ["*"]}, "'common' is reserved"),
+        ({"ws": []}, "non-empty list"),
+        ({"ws": "*-workspace"}, "non-empty list"),
+        ({"ws": [1]}, "non-empty list"),
+        ({"ws": [""]}, "non-empty list"),
+        ({"": ["*"]}, "must not be empty"),
+        ({"ws": ["a"], "WS": ["b"]}, "duplicate profile names: ws"),
+    ],
+)
+def test_invalid_profiles_are_rejected(profiles, message) -> None:
+    with pytest.raises(ConfigError, match=message):
+        parse_config(with_profiles(profiles), Path())
+
+
+def test_profiles_default_to_none_and_rules_to_common() -> None:
+    config = parse_config({"owners": ["me"], "rules": RULES}, Path())
+    assert config.profiles == {}
+    assert config.rules[0].profiles == ["common"]
+
+
+def test_rule_profiles_are_read_and_checked_against_the_definitions() -> None:
+    rules = [{**RULES[0], "profiles": ["common", "ws"]}]
+    config = parse_config(with_profiles({"ws": ["*-workspace"]}, rules), Path())
+    assert config.profiles == {"ws": ["*-workspace"]}
+    assert config.rules[0].profiles == ["common", "ws"]
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ([], "'profiles' must not be empty"),
+        (["common", "common"], "duplicate profiles: common"),
+        (["ws"], "undefined profiles: ws"),
+        ("common", "must be of type list"),
+    ],
+)
+def test_invalid_rule_profiles_are_config_errors(value, message) -> None:
+    rules = [{**RULES[0], "profiles": value}]
+    with pytest.raises(ConfigError, match=f"rule gi: .*{message}|{message}"):
+        parse_config({"owners": ["me"], "rules": rules}, Path())

@@ -14,6 +14,7 @@ from typing import Any, NamedTuple, Protocol
 from github_manager.config import Config
 from github_manager.github import GitHubError, PullRequest, Repo
 from github_manager.rules import Finding, FindingKind, RepoRuleset, ruleset_matches
+from github_manager.rules.base import COMMON_PROFILE, Rule
 
 
 class GitHubApi(Protocol):
@@ -83,6 +84,7 @@ class RepoReport:
     diffs: list[str] = field(default_factory=list)
     detail: str = ""
     auto_merge: str = ""  # what happened to auto-merge; empty when it was not considered
+    profile: str = COMMON_PROFILE
 
     @property
     def manual_findings(self) -> list[Finding]:
@@ -252,6 +254,27 @@ def _pick_repos(repos: list[Repo], only: list[str]) -> set[str]:
     return picked
 
 
+class ProfileConflictError(Exception):
+    """More than one profile matches the repository."""
+
+    def __init__(self, profiles: list[str]) -> None:
+        self.profiles = sorted(profiles)
+        super().__init__(f"conflicting profiles: {', '.join(self.profiles)}")
+
+
+def resolve_profile(config: Config, repo: Repo) -> str:
+    """The one profile of `repo`: the defined profile whose pattern matches its name or
+    OWNER/NAME, `common` when none does; several matching profiles are an error."""
+    matching = [name for name, patterns in config.profiles.items() if _excluded(repo, patterns)]
+    if len(matching) > 1:
+        raise ProfileConflictError(matching)
+    return matching[0] if matching else COMMON_PROFILE
+
+
+def _rule_applies(rule: Rule, repo: Repo, profile: str) -> bool:
+    return profile in rule.profiles and rule.applies_to(repo.name, repo.full_name)
+
+
 def _excluded(repo: Repo, patterns: list[str]) -> bool:
     return any(
         fnmatchcase(repo.name, pattern) or fnmatchcase(repo.full_name, pattern)
@@ -275,9 +298,14 @@ def process_repo(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> Re
     An error in the fix steps keeps the findings and diffs of the evaluation.
     """
     try:
-        evaluation = _evaluate(api, config, repo)
+        profile = resolve_profile(config, repo)
+    except ProfileConflictError as exc:
+        unresolved = ", ".join(exc.profiles)
+        return RepoReport(repo.full_name, Outcome.ERROR, detail=str(exc), profile=unresolved)
+    try:
+        evaluation = _evaluate(api, config, repo, profile)
     except Exception as exc:
-        return RepoReport(repo.full_name, Outcome.ERROR, detail=_error_detail(exc))
+        return RepoReport(repo.full_name, Outcome.ERROR, detail=_error_detail(exc), profile=profile)
     if isinstance(evaluation, RepoReport):
         return evaluation
     if not fix:
@@ -296,16 +324,18 @@ def _error_detail(exc: Exception) -> str:
     return f"unexpected {type(exc).__name__}: {exc}"
 
 
-def _evaluate(api: GitHubApi, config: Config, repo: Repo) -> _Evaluation | RepoReport:
+def _evaluate(api: GitHubApi, config: Config, repo: Repo, profile: str) -> _Evaluation | RepoReport:
     """Apply the rules; a repository without commits is skipped with a ready report."""
     base_sha = api.branch_sha(repo.full_name, repo.default_branch)
     if base_sha is None:
-        return RepoReport(repo.full_name, Outcome.SKIPPED, detail="empty repository")
+        return RepoReport(
+            repo.full_name, Outcome.SKIPPED, detail="empty repository", profile=profile
+        )
 
     workspace = RemoteWorkspace(api, repo.full_name, base_sha, repo.default_branch)
     findings: list[Finding] = []
     for rule in config.rules:
-        if rule.applies_to(repo.name, repo.full_name):
+        if _rule_applies(rule, repo, profile):
             findings.extend(rule.apply(workspace))
     changes = workspace.changes()
     report = RepoReport(
@@ -313,6 +343,7 @@ def _evaluate(api: GitHubApi, config: Config, repo: Repo) -> _Evaluation | RepoR
         Outcome.NEEDS_FIX if findings else Outcome.COMPLIANT,
         findings=findings,
         diffs=[workspace.diff(path) for path in changes],
+        profile=profile,
     )
     return _Evaluation(report, workspace, base_sha, changes)
 
@@ -353,7 +384,7 @@ def _auto_merge(
     """
     name = repo.full_name
     try:
-        if not _verify_required(config, repo, workspace, report.findings):
+        if not _verify_required(config, repo, report.profile, workspace, report.findings):
             return VERIFY_NOT_REQUIRED
         # Only a pull request left untouched keeps its state; a rewritten branch may have lost it.
         if pull.auto_merge and report.outcome is Outcome.PR_UP_TO_DATE:
@@ -372,7 +403,7 @@ def _auto_merge(
 
 
 def _verify_required(
-    config: Config, repo: Repo, workspace: RemoteWorkspace, findings: list[Finding]
+    config: Config, repo: Repo, profile: str, workspace: RemoteWorkspace, findings: list[Finding]
 ) -> bool:
     """True when a ruleset rule requires the `verify` check here and was fully applicable."""
     return any(
@@ -383,7 +414,7 @@ def _verify_required(
             for finding in findings
         )
         for rule in config.rules
-        if isinstance(rule, RepoRuleset) and rule.applies_to(repo.name, repo.full_name)
+        if isinstance(rule, RepoRuleset) and _rule_applies(rule, repo, profile)
     )
 
 

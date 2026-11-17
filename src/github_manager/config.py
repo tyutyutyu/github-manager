@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from github_manager.rules import REQUIRED, RULE_TYPES, Options, RepoVisibility, Rule
+from github_manager.rules.base import COMMON_PROFILE
 
 DEFAULT_CONFIG_PATH = Path("github-manager.toml")
 
@@ -20,6 +21,7 @@ class Config:
     owners: list[str]
     rules: Sequence[Rule]
     exclude: list[str] = field(default_factory=list)
+    profiles: dict[str, list[str]] = field(default_factory=dict)
     include_forks: bool = False
     auto_merge: bool = False
     branch: str = "github-manager/compliance"
@@ -55,6 +57,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path) -> Config:
             owners=_owners(options.text_list("owners", REQUIRED)),
             rules=rules,
             exclude=options.text_list("exclude", []),
+            profiles=_profiles(options.table("profiles", {})),
             include_forks=options.flag("include_forks", defaults.include_forks),
             auto_merge=options.flag("auto_merge", defaults.auto_merge),
             branch=options.text("branch", defaults.branch),
@@ -63,6 +66,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path) -> Config:
         )
         options.finish()
         _check_visibility_owners(config)
+        _check_rule_profiles(config)
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
     return config
@@ -76,6 +80,36 @@ def _owners(owners: list[str]) -> list[str]:
     if duplicates:
         raise ValueError(f"duplicate owners: {', '.join(duplicates)}")
     return owners
+
+
+def _profiles(raw: dict[str, Any]) -> dict[str, list[str]]:
+    """Profile name -> name patterns; `common` is implicit and reserved."""
+    lowered = [name.lower() for name in raw]
+    duplicates = sorted({name for name in lowered if lowered.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate profile names: {', '.join(duplicates)}")
+    profiles: dict[str, list[str]] = {}
+    for name, patterns in raw.items():
+        if not name.strip():
+            raise ValueError("profile names must not be empty")
+        if name.lower() == COMMON_PROFILE:
+            raise ValueError(f"profile name {COMMON_PROFILE!r} is reserved (it is implicit)")
+        if (
+            not isinstance(patterns, list)
+            or not patterns
+            or not all(isinstance(pattern, str) and pattern for pattern in patterns)
+        ):
+            raise ValueError(f"profile {name!r} must be a non-empty list of non-empty strings")
+        profiles[name] = list(patterns)
+    return profiles
+
+
+def _check_rule_profiles(config: Config) -> None:
+    known = {COMMON_PROFILE, *config.profiles}
+    for rule in config.rules:
+        unknown = sorted(set(rule.profiles) - known)
+        if unknown:
+            raise ValueError(f"rule {rule.id}: undefined profiles: {', '.join(unknown)}")
 
 
 def _check_visibility_owners(config: Config) -> None:
