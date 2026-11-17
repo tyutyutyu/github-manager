@@ -31,6 +31,11 @@
       "automerge": false
     },
     {
+      "description": "Files kept in sync from a github-manager template: update the template, not the managed copy (add further template file names to this list)",
+      "matchFileNames": [".github/workflows/backlog-verify.yml"],
+      "enabled": false
+    },
+    {
       "description": "Group all Kotlin Gradle plugins and artifacts with the Kotlin monorepo, also those without a source URL (e.g. org.jetbrains.kotlin.plugin.compose)",
       "matchPackageNames": ["/^org\\.jetbrains\\.kotlin[.:]/"],
       "groupName": "kotlin monorepo"

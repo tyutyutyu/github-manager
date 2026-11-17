@@ -194,6 +194,18 @@ type = "default_branch_push_only"
 path = ".github/workflows/sonarqube.yml"
 exclude = ["tyutyutyu/*"]
 
+[[rules]]
+id = "backlog-verify-workflow"
+type = "file_sync"
+# Backlog profile only: a shared verify workflow (Backlog.md CLI check and basic YAML and
+# Markdown lint, no token). Without it the default-branch ruleset requires no check and
+# the compliance pull requests are not auto-merged. The file is excluded from Renovate in
+# the managed repositories (renovate/default.json); the template is updated here.
+path = ".github/workflows/backlog-verify.yml"
+source = "templates/backlog/backlog-verify.yml"
+exclude = []
+profiles = ["backlog"]
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"
