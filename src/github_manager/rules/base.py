@@ -23,6 +23,11 @@ class Workspace(Protocol):
 
     def paths(self, prefix: str) -> list[str] | None: ...
 
+    def read_repo_file(self, repo: str, path: str) -> str | None:
+        """A file on the default branch of another repository (OWNER/NAME), None when the
+        file or the repository does not exist or is not readable."""
+        ...
+
     def original(self, path: str) -> str | None:
         """The file on the default branch commit, without pending writes."""
         ...

@@ -23,6 +23,7 @@ class GitHubApi(Protocol):
     def compare(self, repo: str, base: str, head: str) -> tuple[int, int, set[str]]: ...
     def tree_paths(self, repo: str, sha: str) -> set[str] | None: ...
     def read_file(self, repo: str, path: str, ref: str) -> str | None: ...
+    def read_default_file(self, repo: str, path: str) -> str | None: ...
     def reset_branch(self, repo: str, branch: str, sha: str, *, exists: bool) -> None: ...
     def delete_branch(self, repo: str, branch: str) -> None: ...
     def commit_files(
@@ -99,12 +100,33 @@ class _PullRequestSync(NamedTuple):
     pull: PullRequest | None
 
 
+class RepoFileCache:
+    """Files of other repositories, read once per run and shared by every workspace."""
+
+    def __init__(self) -> None:
+        self._files: dict[tuple[str, str], str | None] = {}
+
+    def read(self, api: GitHubApi, repo: str, path: str) -> str | None:
+        key = (repo, path)
+        if key not in self._files:
+            self._files[key] = api.read_default_file(repo, path)
+        return self._files[key]
+
+
 class RemoteWorkspace:
     """Files of one commit and the repository settings, read lazily, with local
     changes layered on top."""
 
-    def __init__(self, api: GitHubApi, repo: str, sha: str, default_branch: str) -> None:
+    def __init__(
+        self,
+        api: GitHubApi,
+        repo: str,
+        sha: str,
+        default_branch: str,
+        repo_files: RepoFileCache | None = None,
+    ) -> None:
         self._api = api
+        self._repo_files = repo_files or RepoFileCache()
         self._repo = repo
         self._sha = sha
         self.default_branch = default_branch
@@ -134,6 +156,9 @@ class RemoteWorkspace:
 
     def read(self, path: str) -> str | None:
         return self._written[path] if path in self._written else self.original(path)
+
+    def read_repo_file(self, repo: str, path: str) -> str | None:
+        return self._repo_files.read(self._api, repo, path)
 
     def write(self, path: str, content: str) -> None:
         self._written[path] = content
@@ -292,7 +317,14 @@ class _Evaluation:
     changes: dict[str, str]
 
 
-def process_repo(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> RepoReport:
+def process_repo(
+    api: GitHubApi,
+    config: Config,
+    repo: Repo,
+    *,
+    fix: bool,
+    repo_files: RepoFileCache | None = None,
+) -> RepoReport:
     """Report of one repository; any error only fails this repository.
 
     An error in the fix steps keeps the findings and diffs of the evaluation.
@@ -303,7 +335,7 @@ def process_repo(api: GitHubApi, config: Config, repo: Repo, *, fix: bool) -> Re
         unresolved = ", ".join(exc.profiles)
         return RepoReport(repo.full_name, Outcome.ERROR, detail=str(exc), profile=unresolved)
     try:
-        evaluation = _evaluate(api, config, repo, profile)
+        evaluation = _evaluate(api, config, repo, profile, repo_files)
     except Exception as exc:
         return RepoReport(repo.full_name, Outcome.ERROR, detail=_error_detail(exc), profile=profile)
     if isinstance(evaluation, RepoReport):
@@ -324,7 +356,13 @@ def _error_detail(exc: Exception) -> str:
     return f"unexpected {type(exc).__name__}: {exc}"
 
 
-def _evaluate(api: GitHubApi, config: Config, repo: Repo, profile: str) -> _Evaluation | RepoReport:
+def _evaluate(
+    api: GitHubApi,
+    config: Config,
+    repo: Repo,
+    profile: str,
+    repo_files: RepoFileCache | None,
+) -> _Evaluation | RepoReport:
     """Apply the rules; a repository without commits is skipped with a ready report."""
     base_sha = api.branch_sha(repo.full_name, repo.default_branch)
     if base_sha is None:
@@ -332,7 +370,7 @@ def _evaluate(api: GitHubApi, config: Config, repo: Repo, profile: str) -> _Eval
             repo.full_name, Outcome.SKIPPED, detail="empty repository", profile=profile
         )
 
-    workspace = RemoteWorkspace(api, repo.full_name, base_sha, repo.default_branch)
+    workspace = RemoteWorkspace(api, repo.full_name, base_sha, repo.default_branch, repo_files)
     findings: list[Finding] = []
     for rule in config.rules:
         if _rule_applies(rule, repo, profile):

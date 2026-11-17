@@ -3,9 +3,10 @@ id: TASK-46
 title: >-
   Repók közötti olvasás: file_sync forrás másik repóból (source_repo) és
   ownerenkénti App tokenek az enforce workflow-ban
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16T23:56:00Z'
+updated_date: '2026-11-17T11:58:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -83,18 +84,32 @@ Egy `file_sync` szabály forrása lehet egy másik, akár másik owneré levő r
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A Workspace protokoll olvasni tud egy fájlt egy másik OWNER/NAME repó default ágáról; nem létező vagy nem olvasható fájl vagy repó esetén None az eredmény
-- [ ] #2 A CLI ownerenként opcionális olvasó tokent fogad dokumentált környezeti változóból, és egy másik owner repóját azzal olvassa; token nélkül a fő tokent használja; token nem jelenik meg kimenetben
-- [ ] #3 Az enforce workflow minden ownerjobja a többi ownerre is kér csak contents: read jogú installation tokent a meglévő App-pal, új secret vagy változó nélkül
-- [ ] #4 A file_sync source_repo kulccsal a forrást a megadott repóból olvassa, futásonként forrásonként legfeljebb egyszer; helyi forrással a viselkedés változatlan
-- [ ] #5 Nem olvasható távoli forrásnál a file_sync MANUAL findingot ad a forrás megnevezésével, és nem ír
-- [ ] #6 Hibás source_repo (nem OWNER/NAME), abszolút vagy .. szegmenst tartalmazó távoli source és ismeretlen kulcs config-hiba
-- [ ] #7 A README file_sync opciótáblája és Tokens szakasza leírja a távoli forrást és az ownerenkénti tokeneket
+- [x] #1 A Workspace protokoll olvasni tud egy fájlt egy másik OWNER/NAME repó default ágáról; nem létező vagy nem olvasható fájl vagy repó esetén None az eredmény
+- [x] #2 A CLI ownerenként opcionális olvasó tokent fogad dokumentált környezeti változóból, és egy másik owner repóját azzal olvassa; token nélkül a fő tokent használja; token nem jelenik meg kimenetben
+- [x] #3 Az enforce workflow minden ownerjobja a többi ownerre is kér csak contents: read jogú installation tokent a meglévő App-pal, új secret vagy változó nélkül
+- [x] #4 A file_sync source_repo kulccsal a forrást a megadott repóból olvassa, futásonként forrásonként legfeljebb egyszer; helyi forrással a viselkedés változatlan
+- [x] #5 Nem olvasható távoli forrásnál a file_sync MANUAL findingot ad a forrás megnevezésével, és nem ír
+- [x] #6 Hibás source_repo (nem OWNER/NAME), abszolút vagy .. szegmenst tartalmazó távoli source és ismeretlen kulcs config-hiba
+- [x] #7 A README file_sync opciótáblája és Tokens szakasza leírja a távoli forrást és az ownerenkénti tokeneket
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . && task verify sikeres
-- [ ] #2 Nincs új secret, PAT vagy App-jogosultság
-- [ ] #3 A diff nem tartalmaz a feladathoz nem tartozó változást
+- [x] #1 uv run ruff format -q . && task verify sikeres
+- [x] #2 Nincs új secret, PAT vagy App-jogosultság
+- [x] #3 A diff nem tartalmaz a feladathoz nem tartozó változást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-46-repok-kozotti-olvasas-file-sync-forras-masik-rep.
+
+Lezárási ellenőrzés (2026-11-17): uv run ruff format -q . && task verify sikeres (709 passed, 1 skipped integrációs teszt, 99% lefedettség); uv run github-manager repos betölti a valódi configot; git diff --check tiszta. A rögzített create-github-app-token v3.3.0 action.yml-je tartalmazza az owner és permission-contents inputokat.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+A file_sync új source_repo (OWNER/NAME) kulccsal másik, akár másik owneré levő repó default ágáról olvashatja a forrást. Új Workspace.read_repo_file művelet (RemoteWorkspace a futásonként közös RepoFileCache-en át, MemoryWorkspace other_repos-szal); GitHub.read_default_file None-t ad 404, 401/403 (nem rate limit) és használhatatlan tartalom esetén. Ownerenkénti opcionális olvasó tokenek a GH_READ_TOKEN_<OWNER> változókból (kötőjel -> _), token nélkül a fő token; token nem kerül kimenetbe. Nem olvasható forrás: MANUAL finding a forrás nevével, írás nélkül. Config-hiba: hibás source_repo, abszolút vagy '..' szegmenses távoli source, ismeretlen kulcs. enforce.yml: minden ownerjob a másik ownerre csak contents: read installation tokent kér a meglévő App-pal, új secret/változó nélkül. README file_sync tábla és Tokens szakasz frissítve. Ellenőrzés: task verify sikeres (709 passed), repos parancs OK. Kockázat: új owner felvételekor az enforce.yml olvasó-token lépéseit is bővíteni kell.
+<!-- SECTION:FINAL_SUMMARY:END -->

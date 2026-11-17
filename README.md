@@ -132,18 +132,21 @@ config that does not extend `preset`.
 
 ### `file_sync`
 
-**Checks:** `path` equals the template file `source`.
+**Checks:** `path` equals the template file `source`: a file of this repository, or with
+`source_repo` a file on the default branch of another repository (any owner).
 
 **Options:**
 
 | Key | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `path` | string | yes | | file in the repository |
-| `source` | string | yes | | template file, relative to the configuration file |
+| `source` | string | yes | | template file, relative to the configuration file; with `source_repo`, the path in that repository (not absolute, no `..` segment) |
+| `source_repo` | string | no | | `OWNER/NAME` of the repository holding the template; read through the API (token per owner, see [Tokens](#tokens)), at most once per run and source |
 
 **Fix:** overwrites the file.
 
-**Reported as manual:** nothing.
+**Reported as manual:** a `source_repo` source that is not readable (missing file or
+repository, or no access); nothing is written then.
 
 ### `repo_settings`
 
@@ -404,6 +407,15 @@ The `enforce` workflow uses one public GitHub App with one installation per owne
 (`tyutyutyu` user, `tyutyutyu-org` organization). Every job issues a short-lived
 installation token (valid for one hour, revoked at the end of the job) with
 `actions/create-github-app-token` and passes it as `GH_TOKEN`. No token has to be renewed.
+
+Reading other repositories (`file_sync` with `source_repo`): a repository of another owner
+is read with that owner's optional read-only token, otherwise with the main token. The
+token comes from the variable `GH_READ_TOKEN_<OWNER>`: the owner name in upper case, `-`
+written as `_` (`tyutyutyu-org` → `GH_READ_TOKEN_TYUTYUTYU_ORG`); empty values are ignored.
+In `enforce`, every job also issues an installation token with only `contents: read` for the
+other owners (`actions/create-github-app-token` with `owner` and `permission-contents:
+read`) and passes it in these variables; no new secret or variable is needed. Tokens are
+never printed.
 
 App repository permissions:
 

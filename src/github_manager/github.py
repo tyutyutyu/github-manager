@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +28,11 @@ MAX_RATE_LIMIT_WAIT_SECONDS = 120
 # tokens use other prefixes (`github_pat_`, `ghp_`, `gho_`).
 INSTALLATION_TOKEN_PREFIX = "ghs_"  # noqa: S105 - a public prefix, not a secret
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
+# Optional read-only tokens per owner for reading other owners' repositories: the variable
+# is this prefix plus the owner name in upper case with `-` as `_` (GitHub user and
+# organization names have no `_`, so the mapping is unambiguous), e.g.
+# GH_READ_TOKEN_TYUTYUTYU_ORG for `tyutyutyu-org`.
+OWNER_TOKEN_PREFIX = "GH_READ_TOKEN_"  # noqa: S105 - a variable name prefix, not a secret
 
 logger = logging.getLogger(__name__)
 # The 403 message of a private repository on the Free plan, observed in full as
@@ -63,6 +68,18 @@ class GitHubError(Exception):
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+
+
+class _UnreadableContentError(GitHubError):
+    """The path exists but its content cannot be used as text."""
+
+
+def _is_unreadable_source(exc: GitHubError) -> bool:
+    """Whether a failed cross-repository read means "not readable" rather than a transient
+    failure: no access (401/403, but not a rate limit) or unusable content."""
+    if isinstance(exc, _UnreadableContentError):
+        return True
+    return exc.status in (401, 403) and "rate limit" not in str(exc).lower()
 
 
 @dataclass(frozen=True)
@@ -105,6 +122,17 @@ def resolve_token() -> str:
     raise GitHubError("no GitHub token: set GH_TOKEN or log in with `gh auth login`")
 
 
+def owner_tokens_from_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Owner (lower case) -> token from the `GH_READ_TOKEN_<OWNER>` variables; skips empty ones."""
+    source = os.environ if environ is None else environ
+    tokens = {}
+    for name, value in source.items():
+        owner = name.removeprefix(OWNER_TOKEN_PREFIX)
+        if owner != name and owner and value.strip():
+            tokens[owner.lower().replace("_", "-")] = value.strip()
+    return tokens
+
+
 class _Retry(Exception):
     """One failed attempt that may be retried after `wait` seconds."""
 
@@ -141,6 +169,7 @@ class GitHub:
         *,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
+        owner_tokens: Mapping[str, str] | None = None,
     ):
         if not api_url.startswith("https://"):
             raise GitHubError(f"API URL must use https: {api_url}")
@@ -149,6 +178,10 @@ class GitHub:
         self._open = opener
         self._sleep = sleep
         self._clock = clock
+        self._owner_clients = {
+            owner.lower(): GitHub(token, api_url, opener, sleep=sleep, clock=clock)
+            for owner, token in (owner_tokens or {}).items()
+        }
 
     # --- transport ---------------------------------------------------------
 
@@ -296,20 +329,39 @@ class GitHub:
         return {entry["path"] for entry in tree["tree"] if entry["type"] == "blob"}
 
     def read_file(self, repo: str, path: str, ref: str) -> str | None:
+        return self._read_contents(repo, path, f"?ref={_q(ref)}")
+
+    def read_default_file(self, repo: str, path: str) -> str | None:
+        """The file on the default branch of any repository, with the owner's read token
+        when one is configured. None when the file is not readable: the file or the
+        repository is not found, the token has no access, or the content is unusable
+        (not a regular file, too large, not UTF-8). Transient failures still raise."""
+        owner = repo.split("/", 1)[0].lower()
+        client = self._owner_clients.get(owner, self)
         try:
-            item = self.call("GET", f"/repos/{repo}/contents/{_q(path)}?ref={_q(ref)}")
+            return client._read_contents(repo, path, "")
+        except GitHubError as exc:
+            if _is_unreadable_source(exc):
+                return None
+            raise
+
+    def _read_contents(self, repo: str, path: str, query: str) -> str | None:
+        try:
+            item = self.call("GET", f"/repos/{repo}/contents/{_q(path)}{query}")
         except GitHubError as exc:
             if exc.status == 404:
                 return None
             raise
         if not isinstance(item, dict) or item.get("type") != "file":
-            raise GitHubError(f"{repo}:{path} is not a regular file")
+            raise _UnreadableContentError(f"{repo}:{path} is not a regular file")
         if item.get("encoding") != "base64":
-            raise GitHubError(f"{repo}:{path} is too large to read through the contents API")
+            raise _UnreadableContentError(
+                f"{repo}:{path} is too large to read through the contents API"
+            )
         try:
             return base64.b64decode(item["content"]).decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise GitHubError(f"{repo}:{path} is not valid UTF-8") from exc
+            raise _UnreadableContentError(f"{repo}:{path} is not valid UTF-8") from exc
 
     # --- branches and commits ----------------------------------------------
 

@@ -58,6 +58,9 @@ class FakeGitHub:
         self.merge_states: dict[tuple[str, int], str] = {}
         # Error message to raise from merge_state.
         self.merge_state_error: str | None = None
+        # Repositories whose files `read_default_file` may not read (like GitHub: no access,
+        # which the real client reports as None).
+        self.unreadable_repos: set[str] = set()
 
     def add_repo(
         self,
@@ -138,6 +141,17 @@ class FakeGitHub:
         if path == "broken":
             raise GitHubError("boom", 500)
         return self.repos[repo].commits[ref][1].get(path)
+
+    def read_default_file(self, repo: str, path: str) -> str | None:
+        self.calls.append(f"read {repo}:{path}")
+        state = self.repos.get(repo)
+        if (
+            repo in self.unreadable_repos
+            or state is None
+            or state.info.default_branch not in state.branches
+        ):
+            return None
+        return state.commits[state.branches[state.info.default_branch]][1].get(path)
 
     def reset_branch(self, repo: str, branch: str, sha: str, *, exists: bool) -> None:
         assert (branch in self.repos[repo].branches) == exists
@@ -265,7 +279,10 @@ class MemoryWorkspace:
         rulesets: list[dict[str, Any]] | None = None,
         rulesets_available: bool = True,
         listable: bool = True,
+        other_repos: dict[str, dict[str, str]] | None = None,
     ) -> None:
+        # Files of other repositories (OWNER/NAME -> path -> content), for `read_repo_file`.
+        self.other_repos = other_repos or {}
         self.files = dict(files or {})
         # The default branch commit: `write` changes only `files`.
         self.original_files = dict(self.files)
@@ -284,6 +301,9 @@ class MemoryWorkspace:
 
     def read(self, path: str) -> str | None:
         return self.files.get(path)
+
+    def read_repo_file(self, repo: str, path: str) -> str | None:
+        return self.other_repos.get(repo, {}).get(path)
 
     def write(self, path: str, content: str) -> None:
         self.files[path] = content

@@ -9,6 +9,7 @@ from github_manager.engine import (
     VERIFY_NOT_REQUIRED,
     Outcome,
     RemoteWorkspace,
+    RepoFileCache,
     RepoReport,
     process_repo,
     select_repos,
@@ -1281,3 +1282,63 @@ def test_auto_merge_counts_only_rulesets_of_the_repository_profile(fake_github) 
 
     assert workspace.auto_merge == "enabled (squash)"
     assert common.auto_merge == VERIFY_NOT_REQUIRED
+
+
+def test_remote_file_sync_source_is_read_once_per_run(fake_github) -> None:
+    fake_github.add_repo("hub", {"s.json": "{}\n"}, owner="org")
+    for name in ("a", "b", "c"):
+        fake_github.add_repo(name, {})
+    rule = FileSync.from_options(
+        {"id": "schema", "path": "s.json", "source": "s.json", "source_repo": "org/hub"}, Path()
+    )
+    config = Config(owners=["owner"], rules=[rule])
+    cache = RepoFileCache()
+
+    for name in ("a", "b", "c"):
+        report = process_repo(
+            fake_github, config, repo_named(fake_github, name), fix=False, repo_files=cache
+        )
+        assert report.findings == [Finding("schema", "s.json: missing")]
+
+    assert fake_github.calls.count("read org/hub:s.json") == 1
+
+
+def test_missing_remote_source_is_cached_and_reported_as_manual(fake_github) -> None:
+    for name in ("a", "b"):
+        fake_github.add_repo(name, {})
+    rule = FileSync.from_options(
+        {"id": "schema", "path": "s.json", "source": "s.json", "source_repo": "org/gone"}, Path()
+    )
+    config = Config(owners=["owner"], rules=[rule])
+    cache = RepoFileCache()
+
+    for name in ("a", "b"):
+        report = process_repo(
+            fake_github, config, repo_named(fake_github, name), fix=True, repo_files=cache
+        )
+        assert [f.kind for f in report.findings] == [FindingKind.MANUAL]
+
+    assert fake_github.calls.count("read org/gone:s.json") == 1
+    assert not any(call.startswith("commit") for call in fake_github.calls)
+
+
+def test_denied_remote_source_is_read_once_and_reported_as_manual_everywhere(fake_github) -> None:
+    fake_github.add_repo("hub", {"s.json": "{}\n"}, owner="org")
+    fake_github.unreadable_repos.add("org/hub")
+    for name in ("a", "b", "c"):
+        fake_github.add_repo(name, {})
+    rule = FileSync.from_options(
+        {"id": "schema", "path": "s.json", "source": "s.json", "source_repo": "org/hub"}, Path()
+    )
+    config = Config(owners=["owner"], rules=[rule])
+    cache = RepoFileCache()
+
+    for name in ("a", "b", "c"):
+        report = process_repo(
+            fake_github, config, repo_named(fake_github, name), fix=True, repo_files=cache
+        )
+        assert [f.kind for f in report.findings] == [FindingKind.MANUAL]
+        assert "org/hub" in report.findings[0].message
+
+    assert fake_github.calls.count("read org/hub:s.json") == 1
+    assert not any(call.startswith("commit") for call in fake_github.calls)
