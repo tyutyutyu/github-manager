@@ -83,6 +83,7 @@ Every rule also takes these keys:
 | --- | --- | --- | --- | --- |
 | `id` | string | yes | | rule id shown in findings |
 | `exclude` | list of strings | no | `[]` | shell globs of repositories the rule skips |
+| `profiles` | list of strings | no | `["common"]` | [profiles](#profiles) the rule applies to; not empty, no duplicates, every name defined |
 
 ### `required_lines`
 
@@ -304,6 +305,27 @@ it is written.
 `self_hosted_runners` cannot rewrite: `windows-*`, `macos-*` and other unknown labels,
 expressions, matrices, mappings, external reusable workflows, unparsable files, and
 values it cannot replace safely (a multi-line list, an alias, an anchor or a tag).
+
+## Profiles
+
+Repositories fall into **profiles**: exclusive, name based groups. The top-level `profiles`
+table maps a profile name to a non-empty list of shell globs, matched against the repository
+name and against `OWNER/NAME`, like `exclude`:
+
+```toml
+profiles = { workspace = ["*-workspace"], backlog = ["*-backlog"] }
+```
+
+- A repository belongs to exactly one profile: the defined profile whose pattern matches it.
+  When none matches, it belongs to the implicit `common` profile. `common` is reserved and
+  cannot be defined in `profiles`.
+- A repository matching more than one profile is reported as `error` (the detail names the
+  conflicting profiles); the run continues with the other repositories.
+- A rule applies only to the repositories of the profiles in its `profiles` key (default
+  `["common"]`). This also holds for the auto-merge decision: only `repo_ruleset` rules of
+  the repository's profile count.
+- A rule listing an undefined profile is a configuration error.
+- The console report and the step summary show the profile of every repository.
 
 ## Auto-merge
 

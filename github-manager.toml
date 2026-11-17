@@ -31,6 +31,12 @@ exclude = [
 ]
 include_forks = false
 
+# Repository profiles: exclusive and name based. A repository belongs to the one profile
+# whose pattern (shell glob on the name or OWNER/NAME) matches it, otherwise to the
+# implicit `common` profile; a repository matching two profiles is reported as an error.
+# A rule applies only to the profiles in its `profiles` list (default: ["common"]).
+profiles = { workspace = ["*-workspace"], backlog = ["*-backlog"] }
+
 # Squash auto-merge of the pull request (only the squash merge method is allowed by the
 # rules). It is turned on only in repositories where the repo_ruleset rule requires the
 # `verify` check, after the settings and the ruleset are applied; elsewhere it is skipped.
@@ -49,6 +55,7 @@ preset = "local>tyutyutyu/github-manager//renovate/default"
 # Already included by the preset, so they are dropped from repository configs.
 remove_extends = ["config:recommended", "config:base"]
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "gitignore-baseline"
@@ -75,6 +82,7 @@ CLAUDE.local.md
 # Deleted from the rest of the file.
 remove_lines = [".claude/autoharness/"]
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "gitattributes-baseline"
@@ -87,6 +95,7 @@ lines = '''
 .backlog/** whitespace=-blank-at-eof
 '''
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "branch-strategy"
@@ -95,6 +104,7 @@ type = "branch_strategy"
 default_branch = "main"
 forbidden_branches = ["develop"]
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "repo-settings"
@@ -107,6 +117,7 @@ settings = { delete_branch_on_merge = true, allow_auto_merge = true, allow_updat
 # private ones, which are skipped).
 security_and_analysis = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "default-branch-ruleset"
@@ -127,6 +138,7 @@ required_status_checks = { "tyutyutyu-org/youtube-mirror" = ["test"] }
 required_workflow_check = "verify"
 strict_required_status_checks = true
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "repo-visibility"
@@ -135,6 +147,17 @@ type = "repo_visibility"
 # visibility or transfers a repository.
 visibility = { "tyutyutyu" = "public", "tyutyutyu-org" = "private" }
 exclude = []
+# Only the common profile; the workspace and backlog repositories are private, see
+# profile-visibility.
+profiles = ["common"]
+
+[[rules]]
+id = "profile-visibility"
+type = "repo_visibility"
+# Workspace and backlog repositories are private under both owners.
+visibility = { "tyutyutyu" = "private", "tyutyutyu-org" = "private" }
+exclude = []
+profiles = ["workspace", "backlog"]
 
 [[rules]]
 id = "private-self-hosted-runners"
@@ -149,10 +172,12 @@ allowed_runs_on = [["self-hosted"]]
 # The value that replaces them; it must equal one of the allowed_runs_on sets.
 runs_on = ["self-hosted"]
 exclude = []
+profiles = ["common", "workspace", "backlog"]
 
 [[rules]]
 id = "sonarqube-workflow"
 type = "required_files"
+# Common profile only: workspace and backlog repositories have no SonarQube analysis.
 # Every tyutyutyu-org repository needs its own SonarQube workflow. Only the existence of
 # the file is checked, not its content (it differs per project); a missing file is
 # reported ([manual]) and nothing is written.

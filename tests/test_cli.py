@@ -56,7 +56,10 @@ def test_check_exit_codes_and_output(fake_github, config_path, capsys) -> None:
     out = capsys.readouterr().out
     assert "\x1b[" not in out
     assert "owner/ok" not in out
-    assert "✖ owner/bad  needs fix\n    fix     gi  .gitignore: managed block is missing\n" in out
+    assert (
+        "✖ owner/bad  needs fix  [common]\n    fix     gi  .gitignore: managed block is missing\n"
+        in out
+    )
     assert "\n      +.env\n" in out
     assert out.endswith("\n2 repositories  ✔ 1 compliant  ✖ 1 needs fix\n")
     assert fake_github.pulls["owner/bad"] == {}
@@ -67,7 +70,10 @@ def test_verbose_lists_compliant_repositories(fake_github, config_path, capsys) 
         "ok", {".gitignore": "# >>> github-manager: gi\n.env\n# <<< github-manager: gi\n"}
     )
     assert run(fake_github, config_path, "check", "-v") == EXIT_OK
-    assert capsys.readouterr().out == "✔ owner/ok  compliant\n\n1 repositories  ✔ 1 compliant\n"
+    assert (
+        capsys.readouterr().out
+        == "✔ owner/ok  compliant  [common]\n\n1 repositories  ✔ 1 compliant\n"
+    )
 
 
 @pytest.mark.parametrize("variable", ["FORCE_COLOR", "GITHUB_ACTIONS"])
@@ -144,10 +150,10 @@ def test_fix_opens_pull_requests_and_writes_step_summary(
     fake_github.add_repo("bad", {})
 
     assert run(fake_github, config_path, "fix", "--repo", "bad") == EXIT_OK
-    assert "✚ owner/bad  pull request created  https://example/owner/bad/pull/1\n" in (
+    assert "✚ owner/bad  pull request created  [common]  https://example/owner/bad/pull/1\n" in (
         capsys.readouterr().out
     )
-    assert "| owner/bad | pull request created https://example/owner/bad/pull/1 |" in (
+    assert "| owner/bad | common | pull request created https://example/owner/bad/pull/1 |" in (
         summary.read_text()
     )
 
@@ -217,13 +223,13 @@ def test_unexpected_error_does_not_stop_the_run(
     monkeypatch.setattr(fake_github, "tree_paths", broken)
     assert run(fake_github, config_path, "check") == EXIT_ERROR
     captured = capsys.readouterr()
-    assert "✖ owner/a  error  unexpected KeyError: 'sha'\n" in captured.out
-    assert "✖ owner/b  needs fix\n" in captured.out
+    assert "✖ owner/a  error  [common]  unexpected KeyError: 'sha'\n" in captured.out
+    assert "✖ owner/b  needs fix  [common]\n" in captured.out
     assert captured.out.endswith("\n2 repositories  ✖ 1 needs fix  ✖ 1 error\n")
     assert "Traceback (most recent call last)" in captured.err
     table = summary.read_text()
-    assert "| owner/a | error unexpected KeyError: 'sha' |" in table
-    assert "| owner/b | needs fix |" in table
+    assert "| owner/a | common | error unexpected KeyError: 'sha' |" in table
+    assert "| owner/b | common | needs fix |" in table
 
 
 def test_error_in_fix_steps_prints_the_findings(
@@ -237,7 +243,7 @@ def test_error_in_fix_steps_prints_the_findings(
     monkeypatch.setattr(fake_github, "commit_files", fail)
     assert run(fake_github, config_path, "fix") == EXIT_ERROR
     out = capsys.readouterr().out
-    assert "✖ owner/app  error  commit broke\n" in out
+    assert "✖ owner/app  error  [common]  commit broke\n" in out
     assert "    fix     gi  .gitignore: managed block is missing\n" in out
 
 
@@ -361,7 +367,7 @@ def test_fix_prints_auto_merge_result_and_escapes_it_in_the_job_summary(
     assert run(fake_github, path, "fix", "--repo", "app") == EXIT_OK
     output = capsys.readouterr().out
     assert "    auto-merge  failed: GraphQL: not allowed | try\nlater\n" in output
-    assert "| owner/app | pull request created https://example/owner/app/pull/1 |" in (
+    assert "| owner/app | common | pull request created https://example/owner/app/pull/1 |" in (
         summary.read_text()
     )
     assert "| failed: GraphQL: not allowed \\| try<br>later |" in summary.read_text()
@@ -375,3 +381,39 @@ def test_fix_prints_why_auto_merge_was_skipped(fake_github, tmp_path, capsys) ->
     run(fake_github, path, "fix")
 
     assert "    auto-merge  not enabled: verify is not required\n" in capsys.readouterr().out
+
+
+def test_report_and_step_summary_show_the_profile(
+    fake_github, tmp_path, monkeypatch, capsys
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    path = tmp_path / "c.toml"
+    path.write_text(
+        CONFIG.replace(
+            'owners = ["owner"]', 'owners = ["owner"]\nprofiles = { ws = ["*-ws"] }'
+        ).replace('path = ".gitignore"', 'path = ".gitignore"\nprofiles = ["common", "ws"]')
+    )
+    fake_github.add_repo("a-ws", {})
+
+    assert run(fake_github, path, "check") == EXIT_FINDINGS
+    assert "✖ owner/a-ws  needs fix  [ws]\n" in capsys.readouterr().out
+    assert "| owner/a-ws | ws | needs fix |" in summary.read_text()
+
+
+def test_report_shows_the_conflicting_profiles_of_a_repository(
+    fake_github, tmp_path, monkeypatch, capsys
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    path = tmp_path / "c.toml"
+    path.write_text(
+        CONFIG.replace(
+            'owners = ["owner"]', 'owners = ["owner"]\nprofiles = { ws = ["*-ws"], bl = ["a-*"] }'
+        )
+    )
+    fake_github.add_repo("a-ws", {})
+
+    assert run(fake_github, path, "check") != 0
+    assert "conflicting profiles: bl, ws" in capsys.readouterr().out
+    assert "| owner/a-ws | bl, ws | error conflicting profiles: bl, ws |" in summary.read_text()
