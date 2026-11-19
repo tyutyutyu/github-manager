@@ -14,11 +14,9 @@ exclude = [
     "tyutyutyu/java-web-frameworks",
     "tyutyutyu/mese-app",
     "tyutyutyu/mese-doboz",
-    "tyutyutyu/msps",
     "tyutyutyu/news-indexer-page-parsers",
     "tyutyutyu/pdf-titan",
     "tyutyutyu/release-notes-news",
-    "tyutyutyu/task-center",
     "tyutyutyu/tyutyutyu",
     "tyutyutyu/tyutyutyu-dashboard-extension",
     "tyutyutyu/tyutyutyu-ecosystem",
@@ -127,7 +125,7 @@ type = "repo_ruleset"
 # request. Other rulesets are left alone. Needs a token with Administration: read/write.
 # Required checks per repository (glob on the name or OWNER/NAME); only names that report
 # on the default branch, otherwise no pull request can be merged there.
-required_status_checks = { "tyutyutyu-org/youtube-mirror" = ["test"] }
+required_status_checks = {}
 # The `verify` check is required only where a workflow on the default branch certainly runs
 # it on pull requests; otherwise it is reported ([manual]) and left out. The check name is
 # the job's `name:` (its id without one), not the workflow name or file name. A matrix job
@@ -205,6 +203,31 @@ path = ".github/workflows/backlog-verify.yml"
 source = "templates/backlog/backlog-verify.yml"
 exclude = []
 profiles = ["backlog"]
+
+[[rules]]
+id = "workspace-schema"
+type = "file_sync"
+# Workspace profile only: the JSON Schema of workspace.yaml is published by the easy-github
+# repository and copied into the workspace repositories by the compliance pull request, so
+# a change there reaches them with the next `fix` run. The verify workflow validates against it.
+path = ".github/schemas/workspace.schema.json"
+source_repo = "tyutyutyu-org/easy-github"
+source = "schemas/workspace.schema.json"
+profiles = ["workspace"]
+exclude = []
+
+[[rules]]
+id = "workspace-verify-workflow"
+type = "file_sync"
+# Workspace profile only: a shared verify workflow (workspace.yaml schema and consistency
+# check, basic YAML and Markdown lint, no token). Without it the default-branch ruleset
+# requires no check and the compliance pull requests are not auto-merged. The file is
+# excluded from Renovate in the managed repositories (renovate/default.json); the template
+# is updated here.
+path = ".github/workflows/workspace-verify.yml"
+source = "templates/workspace/workspace-verify.yml"
+profiles = ["workspace"]
+exclude = []
 
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]

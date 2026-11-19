@@ -3,9 +3,10 @@ id: TASK-47
 title: >-
   Workspace profil: közös verify workflow sablon és az easy-github
   workspace.yaml sémájának szinkronja
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16T23:57:00Z'
+updated_date: '2026-11-19T08:30:00Z'
 labels: []
 dependencies:
   - TASK-44
@@ -92,17 +93,33 @@ Minden workspace profilú repóban ott van a sémafájl és a közös `verify` w
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A templates/workspace/workspace-verify.yml sablon verify id-jű jobja main push-ra és szűrő nélküli pull_request-re fut, contents: read joggal, runs-on: self-hosted, SHA-ra rögzített actionökkel, token vagy secret nélkül, és futáskor nem tölt le semmit a github-manager vagy az easy-github repóból
-- [ ] #2 A workflow elbukik, ha a workspace.yaml nem felel meg a .github/schemas/workspace.schema.json sémának, ha a backlog nem szerepel a repositories nevei között, ha egy név ismétlődik, ha egy tagmappát a .gitignore nem zár ki (git check-ignore), vagy ha a yamllint vagy markdownlint hibát talál
-- [ ] #3 A github-manager.toml workspace-schema szabálya (file_sync, source_repo = tyutyutyu-org/easy-github) és workspace-verify-workflow szabálya csak a workspace profilra vonatkozik
-- [ ] #4 Teszt igazolja, hogy a sablonon a self_hosted_runners szabály nem ad findingot, és a repo_ruleset a verify jobot kötelező checkként elfogadja
-- [ ] #5 A Renovate preset a .github/workflows/workspace-verify.yml frissítését is kikapcsolja a kezelt repókban
-- [ ] #6 A README leírja a workspace profilt, a séma eredetét és frissülését
+- [x] #1 A templates/workspace/workspace-verify.yml sablon verify id-jű jobja main push-ra és szűrő nélküli pull_request-re fut, contents: read joggal, runs-on: self-hosted, SHA-ra rögzített actionökkel, token vagy secret nélkül, és futáskor nem tölt le semmit a github-manager vagy az easy-github repóból
+- [x] #2 A workflow elbukik, ha a workspace.yaml nem felel meg a .github/schemas/workspace.schema.json sémának, ha a backlog nem szerepel a repositories nevei között, ha egy név ismétlődik, ha egy tagmappát a .gitignore nem zár ki (git check-ignore), vagy ha a yamllint vagy markdownlint hibát talál
+- [x] #3 A github-manager.toml workspace-schema szabálya (file_sync, source_repo = tyutyutyu-org/easy-github) és workspace-verify-workflow szabálya csak a workspace profilra vonatkozik
+- [x] #4 Teszt igazolja, hogy a sablonon a self_hosted_runners szabály nem ad findingot, és a repo_ruleset a verify jobot kötelező checkként elfogadja
+- [x] #5 A Renovate preset a .github/workflows/workspace-verify.yml frissítését is kikapcsolja a kezelt repókban
+- [x] #6 A README leírja a workspace profilt, a séma eredetét és frissülését
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . && task verify sikeres
-- [ ] #2 A kézi ellenőrzés (jó és hibás manifestek) eredménye az implementációs jegyzetben
-- [ ] #3 Nincs írás az easy-github vagy más kezelt repóba, és nincs teszt a valódi github-manager.toml tartalmára
+- [x] #1 uv run ruff format -q . && task verify sikeres
+- [x] #2 A kézi ellenőrzés (jó és hibás manifestek) eredménye az implementációs jegyzetben
+- [x] #3 Nincs írás az easy-github vagy más kezelt repóba, és nincs teszt a valódi github-manager.toml tartalmára
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-47-workspace-profil-kozos-verify-workflow-sablon-es.
+
+Kézi ellenőrzés (a sablon lépései a zenget-workspace ideiglenes másolatán, a séma az easy-github schemas/workspace.schema.json fájlja): a jó manifest átmegy (séma, konzisztencia, yamllint). A backlog hiányzik a listából: a konzisztencia-lépés elbukik. Tagmappa nincs a .gitignore-ban: a konzisztencia-lépés elbukik. Kötelező mező (backlog) hiányzik: a séma és a konzisztencia lépés elbukik. Ismétlődő név: a konzisztencia-lépés elbukik. Duplikált YAML kulcs: a yamllint elbukik. A check --diff -o tyutyutyu --repo zenget-workspace a sémát és a workflow-t hiányzóként, a forrásokkal azonos tartalommal mutatja. A séma az easy-github default ágán a schemas/workspace.schema.json (a felhasználó adta meg a helyi útját, a távoli ellenőrzés megerősítette). A github-manager.toml working tree-ben a feladathoz nem tartozó, korábbi módosítások is vannak (exclude lista, required_status_checks): ezekhez nem nyúltam.
+
+Lezárási ellenőrzés: tests/test_templates.py 6 teszt sikeres (backlog és workspace sablon), uv run github-manager repos betölti a valódi configot; a task verify (ruff, ty, deptry, pytest 712 sikeres/1 kihagyott, 99,33% lefedettség, audit, build) sikeres. A github-manager.toml nem a feladathoz tartozó módosításait (exclude: msps, task-center; required_status_checks = {}) a commitnál külön kell kezelni.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Workspace profil közös verify workflow-ja és sémája. Új sablon: templates/workspace/workspace-verify.yml (verify job, push main + pull_request, contents: read, self-hosted, SHA-ra rögzített actionök, token nélkül): check-jsonschema a szinkronizált .github/schemas/workspace.schema.json ellen, beágyazott konzisztencia-ellenőrzés (backlog a repositories között, egyedi nevek, git check-ignore a tagmappákra), yamllint és markdownlint-cli2 szintaktikai szabályokkal, Renovate által frissíthető eszközverziókkal. github-manager.toml: workspace-schema (file_sync, source_repo = tyutyutyu-org/easy-github, schemas/workspace.schema.json) és workspace-verify-workflow szabály, csak profiles = [workspace]. renovate/default.json: a workflow kizárva a kezelt repókban. tests/test_templates.py paraméterezve mindkét sablonra (self_hosted_runners: nincs finding; verify kötelező checkként elfogadva). README: új szakasz a profilról, a séma eredetéről és frissüléséről. Ellenőrzés: task verify sikeres; kézi ellenőrzés a zenget-workspace másolatán (jó manifest átmegy, hibás esetek buknak); check --diff a forrásokkal azonos tartalmat mutat. Kockázat: szigorúbb séma esetén a verify piros lesz és az auto-merge elmarad. A github-manager.toml nem kapcsolódó working tree módosításait commitnál külön kell kezelni.
+<!-- SECTION:FINAL_SUMMARY:END -->
