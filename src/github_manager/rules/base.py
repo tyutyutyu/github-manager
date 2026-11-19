@@ -28,6 +28,10 @@ class Workspace(Protocol):
         file or the repository does not exist or is not readable."""
         ...
 
+    def repo_exists(self, repo: str) -> bool:
+        """Whether another repository (OWNER/NAME) exists and is readable."""
+        ...
+
     def original(self, path: str) -> str | None:
         """The file on the default branch commit, without pending writes."""
         ...

@@ -32,7 +32,7 @@ Source lives in `src/github_manager/`; read the code for details.
 - `engine.py`: `select_repos`, `process_repo`, the `RemoteWorkspace` adapter, the pull request, setting and ruleset sync, auto-merge.
 - `github.py`: the `GitHub` REST/GraphQL client (no third-party GitHub library).
 - `rules/base.py`: `Workspace` protocol, `Finding`, `Options`, abstract `Rule`.
-- `rules/files.py`, `rules/renovate.py`, `rules/settings.py`, `rules/ruleset.py`, `rules/workflows.py`: the rule types; `rules/__init__.py` holds the `RULE_TYPES` registry.
+- `rules/files.py`, `rules/renovate.py`, `rules/settings.py`, `rules/ruleset.py`, `rules/workflows.py`, `rules/workspace.py`: the rule types; `rules/__init__.py` holds the `RULE_TYPES` registry.
 
 Data flow: `cli.main` → `load_config` → `select_repos` → `process_repo` per repository → `Rule.apply` on a `Workspace` → one pull request, direct setting changes and ruleset changes.
 

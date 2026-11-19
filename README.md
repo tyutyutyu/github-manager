@@ -76,6 +76,7 @@ without the switch.
 | [`required_files`](#required_files) | listed files exist | report only |
 | [`default_branch_push_only`](#default_branch_push_only) | a workflow runs only on pushes to the default branch | report only |
 | [`self_hosted_runners`](#self_hosted_runners) | private workflows run on allowed self-hosted runners | pull request |
+| [`workspace_members`](#workspace_members) | the repositories listed in `workspace.yaml` exist | report only |
 
 Every rule also takes these keys:
 
@@ -282,6 +283,28 @@ reported.
 
 **Reported as manual:** a `default_branch_push_only` workflow that can run on anything
 but a push to the default branch (one finding naming the first problem).
+
+### `workspace_members`
+
+**Checks:** every repository in the `repositories` list of the workspace manifest `path`
+exists and is readable. Each item needs a `name` and an `origin`, either
+`git@github.com:OWNER/NAME(.git)` or `https://github.com/OWNER/NAME(.git)`. The member may
+be private and may belong to another owner: it is looked up with the read token of its
+owner (see [Tokens](#tokens)), at most once per run and repository. The schema and the
+internal consistency of the manifest are not checked here (the workspace verify workflow does).
+
+**Options:**
+
+| Key | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `path` | string | no | `workspace.yaml` | the manifest; no leading or trailing `/`, no `..` segment |
+
+**Fix:** none; nothing is written.
+
+**Reported as manual:** a missing manifest, invalid YAML, no `repositories` list, an item
+without `name` or `origin`, an unsupported `origin` (other host or format), and a member
+that does not exist or is not readable. The message names the manifest `path` and the
+member. A member whose owner has no App installation is always reported as not readable.
 
 ### `self_hosted_runners`
 

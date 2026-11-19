@@ -24,6 +24,7 @@ class GitHubApi(Protocol):
     def tree_paths(self, repo: str, sha: str) -> set[str] | None: ...
     def read_file(self, repo: str, path: str, ref: str) -> str | None: ...
     def read_default_file(self, repo: str, path: str) -> str | None: ...
+    def repo_exists(self, repo: str) -> bool: ...
     def reset_branch(self, repo: str, branch: str, sha: str, *, exists: bool) -> None: ...
     def delete_branch(self, repo: str, branch: str) -> None: ...
     def commit_files(
@@ -105,12 +106,19 @@ class RepoFileCache:
 
     def __init__(self) -> None:
         self._files: dict[tuple[str, str], str | None] = {}
+        self._exists: dict[str, bool] = {}
 
     def read(self, api: GitHubApi, repo: str, path: str) -> str | None:
         key = (repo, path)
         if key not in self._files:
             self._files[key] = api.read_default_file(repo, path)
         return self._files[key]
+
+    def exists(self, api: GitHubApi, repo: str) -> bool:
+        key = repo.lower()
+        if key not in self._exists:
+            self._exists[key] = api.repo_exists(repo)
+        return self._exists[key]
 
 
 class RemoteWorkspace:
@@ -159,6 +167,9 @@ class RemoteWorkspace:
 
     def read_repo_file(self, repo: str, path: str) -> str | None:
         return self._repo_files.read(self._api, repo, path)
+
+    def repo_exists(self, repo: str) -> bool:
+        return self._repo_files.exists(self._api, repo)
 
     def write(self, path: str, content: str) -> None:
         self._written[path] = content

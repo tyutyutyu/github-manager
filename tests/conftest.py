@@ -153,6 +153,10 @@ class FakeGitHub:
             return None
         return state.commits[state.branches[state.info.default_branch]][1].get(path)
 
+    def repo_exists(self, repo: str) -> bool:
+        self.calls.append(f"exists {repo}")
+        return repo in self.repos and repo not in self.unreadable_repos
+
     def reset_branch(self, repo: str, branch: str, sha: str, *, exists: bool) -> None:
         assert (branch in self.repos[repo].branches) == exists
         state = self.repos[repo]
@@ -304,6 +308,9 @@ class MemoryWorkspace:
 
     def read_repo_file(self, repo: str, path: str) -> str | None:
         return self.other_repos.get(repo, {}).get(path)
+
+    def repo_exists(self, repo: str) -> bool:
+        return repo in self.other_repos
 
     def write(self, path: str, content: str) -> None:
         self.files[path] = content
