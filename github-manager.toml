@@ -14,11 +14,9 @@ exclude = [
     "tyutyutyu/java-web-frameworks",
     "tyutyutyu/mese-app",
     "tyutyutyu/mese-doboz",
-    "tyutyutyu/msps",
     "tyutyutyu/news-indexer-page-parsers",
     "tyutyutyu/pdf-titan",
     "tyutyutyu/release-notes-news",
-    "tyutyutyu/task-center",
     "tyutyutyu/tyutyutyu",
     "tyutyutyu/tyutyutyu-dashboard-extension",
     "tyutyutyu/tyutyutyu-ecosystem",
@@ -127,7 +125,7 @@ type = "repo_ruleset"
 # request. Other rulesets are left alone. Needs a token with Administration: read/write.
 # Required checks per repository (glob on the name or OWNER/NAME); only names that report
 # on the default branch, otherwise no pull request can be merged there.
-required_status_checks = { "tyutyutyu-org/youtube-mirror" = ["test"] }
+required_status_checks = {}
 # The `verify` check is required only where a workflow on the default branch certainly runs
 # it on pull requests; otherwise it is reported ([manual]) and left out. The check name is
 # the job's `name:` (its id without one), not the workflow name or file name. A matrix job
