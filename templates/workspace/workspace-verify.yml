@@ -1,0 +1,104 @@
+# Managed by github-manager (file_sync): do not edit here, change
+# templates/workspace/workspace-verify.yml in the github-manager repository instead.
+name: workspace-verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Tool versions are pinned here; Renovate updates them in the github-manager repository
+  # (custom manager in its renovate.json), the managed repositories receive the new file.
+  # renovate: datasource=pypi depName=check-jsonschema
+  CHECK_JSONSCHEMA_VERSION: 0.39.0
+  # renovate: datasource=npm depName=markdownlint-cli2
+  MARKDOWNLINT_CLI2_VERSION: 0.24.1
+  # renovate: datasource=pypi depName=yamllint
+  YAMLLINT_VERSION: 1.38.0
+
+jobs:
+  verify:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.2"
+      - name: Install the tools
+        run: |
+          npm install --global "markdownlint-cli2@${MARKDOWNLINT_CLI2_VERSION}"
+          python -m pip install \
+            "check-jsonschema==${CHECK_JSONSCHEMA_VERSION}" \
+            "yamllint==${YAMLLINT_VERSION}"
+      # The schema is the synced copy of the one published by the easy-github repository.
+      - name: Validate workspace.yaml against the schema
+        run: |
+          check-jsonschema --schemafile .github/schemas/workspace.schema.json workspace.yaml
+      # `backlog` must name a member repository, member names must be unique, and the
+      # .gitignore must exclude the folder of every member (decided by git itself).
+      - name: Check the manifest consistency
+        run: |
+          python - <<'PY'
+          import subprocess
+          import sys
+          from collections import Counter
+
+          import yaml
+
+          with open("workspace.yaml", encoding="utf-8") as manifest_file:
+              manifest = yaml.safe_load(manifest_file)
+
+          names = [repository["name"] for repository in manifest["repositories"]]
+          errors = []
+          if manifest["backlog"] not in names:
+              errors.append(f"backlog '{manifest['backlog']}' is not in repositories")
+          for name, count in Counter(names).items():
+              if count > 1:
+                  errors.append(f"repository name '{name}' is listed {count} times")
+          for name in sorted(set(names)):
+              ignored = subprocess.run(
+                  ["git", "check-ignore", "-q", "--", f"{name}/"], check=False
+              )
+              if ignored.returncode == 1:
+                  errors.append(f"{name}/ is not excluded by .gitignore")
+              elif ignored.returncode != 0:
+                  errors.append(f"git check-ignore failed for {name}/")
+
+          for error in errors:
+              print(f"::error::{error}")
+          sys.exit(1 if errors else 0)
+          PY
+      # Syntax-level rules only, so that any hand-written root file passes.
+      - name: Lint YAML
+        run: |
+          yamllint -d '{rules: {key-duplicates: enable}}' .
+      - name: Lint Markdown
+        run: |
+          cat > "${RUNNER_TEMP}/markdownlint.jsonc" <<'JSON'
+          {
+            "config": {
+              "default": false,
+              "MD011": true,
+              "MD042": true,
+              "MD052": true,
+              "MD055": true,
+              "MD056": true
+            }
+          }
+          JSON
+          markdownlint-cli2 --config "${RUNNER_TEMP}/markdownlint.jsonc" \
+            "*.md" "#node_modules"

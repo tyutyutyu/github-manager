@@ -32,7 +32,10 @@
     },
     {
       "description": "Files kept in sync from a github-manager template: update the template, not the managed copy (add further template file names to this list)",
-      "matchFileNames": [".github/workflows/backlog-verify.yml"],
+      "matchFileNames": [
+        ".github/workflows/backlog-verify.yml",
+        ".github/workflows/workspace-verify.yml"
+      ],
       "enabled": false
     },
     {

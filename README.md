@@ -356,6 +356,34 @@ itself is updated in this repository: its `renovate.json` also handles `template
 (action digests through the `github-actions` manager, tool versions through a regex
 manager), and the next `fix` run delivers the new file to the managed repositories.
 
+### Workspace profile verify workflow and schema
+
+A `workspace` profile repository (`*-workspace`) holds only root files and a `workspace.yaml`
+manifest (`kind: easy-github-workspace`, `backlog`, `repositories[].name` and `origin`). Two
+`file_sync` rules, both limited to this profile, deliver the checks:
+
+- `workspace-verify-workflow`: `.github/workflows/workspace-verify.yml`, kept identical to
+  `templates/workspace/workspace-verify.yml`. It needs no token or secret, runs on
+  `self-hosted` and downloads nothing from this or the easy-github repository at run time.
+  Its `verify` job runs on pushes to `main` and on every pull request, and fails when:
+  - `workspace.yaml` does not match `.github/schemas/workspace.schema.json`
+    (`check-jsonschema`);
+  - `backlog` is not one of the `repositories[].name` values, or a name is listed twice;
+  - `.gitignore` does not exclude the `<name>/` folder of a member repository (decided by
+    `git check-ignore`, not by text matching);
+  - `yamllint` (duplicate keys, syntax errors) or `markdownlint-cli2` (broken links, undefined
+    references, malformed tables) finds an error in the root files.
+- `workspace-schema`: `.github/schemas/workspace.schema.json`, copied from
+  `schemas/workspace.schema.json` on the default branch of `tyutyutyu-org/easy-github`
+  (`source_repo`).
+
+**Schema origin and updates:** the easy-github repository owns the schema; nothing is written
+there. A change of the schema reaches the workspace repositories as a compliance pull request
+with the next `fix` run. Reading it needs a token that sees easy-github (see
+[Tokens](#tokens)); if it is not readable the rule is reported as `[manual]` and nothing is
+written. The workflow file is excluded from Renovate in the managed repositories, like the
+backlog one (`renovate/default.json`).
+
 ## Auto-merge
 
 With `auto_merge = true` (top-level key, default `false`), `fix` turns on **squash

@@ -206,6 +206,31 @@ source = "templates/backlog/backlog-verify.yml"
 exclude = []
 profiles = ["backlog"]
 
+[[rules]]
+id = "workspace-schema"
+type = "file_sync"
+# Workspace profile only: the JSON Schema of workspace.yaml is published by the easy-github
+# repository and copied into the workspace repositories by the compliance pull request, so
+# a change there reaches them with the next `fix` run. The verify workflow validates against it.
+path = ".github/schemas/workspace.schema.json"
+source_repo = "tyutyutyu-org/easy-github"
+source = "schemas/workspace.schema.json"
+profiles = ["workspace"]
+exclude = []
+
+[[rules]]
+id = "workspace-verify-workflow"
+type = "file_sync"
+# Workspace profile only: a shared verify workflow (workspace.yaml schema and consistency
+# check, basic YAML and Markdown lint, no token). Without it the default-branch ruleset
+# requires no check and the compliance pull requests are not auto-merged. The file is
+# excluded from Renovate in the managed repositories (renovate/default.json); the template
+# is updated here.
+path = ".github/workflows/workspace-verify.yml"
+source = "templates/workspace/workspace-verify.yml"
+profiles = ["workspace"]
+exclude = []
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"
