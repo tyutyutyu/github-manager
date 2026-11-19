@@ -739,3 +739,33 @@ def test_other_client_errors_are_not_retried(
     assert info.value.status == status
     assert len(http.requests) == 1
     assert fake_time.sleeps == []
+
+
+def test_repo_exists_uses_the_owner_token(http: FakeHttp, fake_time: FakeTime) -> None:
+    client = GitHub(
+        "secret",
+        opener=http,
+        sleep=fake_time.sleep,
+        clock=fake_time.clock,
+        owner_tokens={"Other-Org": "other-token"},
+    )
+    http.token = "other-token"  # noqa: S105
+    http.queue({"full_name": "other-org/x"})
+    assert client.repo_exists("other-org/x") is True
+    assert http.requests[0][1] == f"{API}/repos/other-org/x"
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_repo_exists_is_false_when_missing_or_not_visible(
+    http: FakeHttp, client: GitHub, status: int
+) -> None:
+    http.queue({"message": "Not Found"}, status=status)
+    assert client.repo_exists("other/x") is False
+
+
+def test_repo_exists_raises_on_transient_failure(http: FakeHttp, fake_time: FakeTime) -> None:
+    client = GitHub("secret", opener=http, sleep=fake_time.sleep)
+    for _ in range(github.MAX_ATTEMPTS):
+        http.queue({"message": "Server Error"}, status=500)
+    with pytest.raises(GitHubError):
+        client.repo_exists("other/x")

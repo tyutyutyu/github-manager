@@ -19,6 +19,7 @@ from github_manager.rules.renovate import RenovatePreset
 from github_manager.rules.ruleset import RepoRuleset, ruleset_matches
 from github_manager.rules.settings import BranchStrategy, RepoSettings, RepoVisibility
 from github_manager.rules.workflows import DefaultBranchPushOnly, SelfHostedRunners
+from github_manager.rules.workspace import WorkspaceMembers
 
 __all__ = [
     "NOT_READABLE",
@@ -39,6 +40,7 @@ __all__ = [
     "Rule",
     "SelfHostedRunners",
     "Workspace",
+    "WorkspaceMembers",
     "ruleset_matches",
 ]
 
@@ -55,5 +57,6 @@ RULE_TYPES: dict[str, type[Rule]] = {
         RequiredFiles,
         DefaultBranchPushOnly,
         SelfHostedRunners,
+        WorkspaceMembers,
     )
 }

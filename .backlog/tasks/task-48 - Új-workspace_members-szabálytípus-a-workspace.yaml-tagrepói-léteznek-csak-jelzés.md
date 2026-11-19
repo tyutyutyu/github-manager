@@ -3,9 +3,10 @@ id: TASK-48
 title: >-
   Új workspace_members szabálytípus: a workspace.yaml tagrepói léteznek (csak
   jelzés)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16T23:57:00Z'
+updated_date: '2026-11-19T09:23:00Z'
 labels: []
 dependencies:
   - TASK-44
@@ -87,17 +88,31 @@ A repók közötti olvasást (ownerenkénti tokenek, `Workspace`-bővítés) egy
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A workspace_members szabálytípus regisztrálva van; ha a path (alapértelmezés workspace.yaml) minden tagrepója létezik, nincs finding
-- [ ] #2 MANUAL findingot ad hiányzó vagy érvénytelen YAML manifestre, hiányzó repositories listára, name vagy origin nélküli elemre, nem támogatott originre és nem létező vagy nem olvasható tagrepóra; az üzenet megnevezi a tagot
-- [ ] #3 A git@github.com:OWNER/NAME és https://github.com/OWNER/NAME origin formátumot .git utótaggal és anélkül is felismeri
-- [ ] #4 A tagrepó létezését a Workspace-en át, a repó ownerének tokenjével kérdezi le, futásonként repónként legfeljebb egyszer
-- [ ] #5 A szabály check és fix módban sem ír, nem nyit PR-t és nem módosít beállítást; ismeretlen kulcs config-hiba
-- [ ] #6 A github-manager.toml workspace-members szabálya csak a workspace profilra vonatkozik; a README Rule types alatt van workspace_members alszakasz
+- [x] #1 A workspace_members szabálytípus regisztrálva van; ha a path (alapértelmezés workspace.yaml) minden tagrepója létezik, nincs finding
+- [x] #2 MANUAL findingot ad hiányzó vagy érvénytelen YAML manifestre, hiányzó repositories listára, name vagy origin nélküli elemre, nem támogatott originre és nem létező vagy nem olvasható tagrepóra; az üzenet megnevezi a tagot
+- [x] #3 A git@github.com:OWNER/NAME és https://github.com/OWNER/NAME origin formátumot .git utótaggal és anélkül is felismeri
+- [x] #4 A tagrepó létezését a Workspace-en át, a repó ownerének tokenjével kérdezi le, futásonként repónként legfeljebb egyszer
+- [x] #5 A szabály check és fix módban sem ír, nem nyit PR-t és nem módosít beállítást; ismeretlen kulcs config-hiba
+- [x] #6 A github-manager.toml workspace-members szabálya csak a workspace profilra vonatkozik; a README Rule types alatt van workspace_members alszakasz
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 uv run ruff format -q . && task verify sikeres
-- [ ] #2 Nincs teszt a valódi github-manager.toml tartalmára
-- [ ] #3 A diff nem tartalmaz a feladathoz nem tartozó változást
+- [x] #1 uv run ruff format -q . && task verify sikeres
+- [x] #2 Nincs teszt a valódi github-manager.toml tartalmára
+- [x] #3 A diff nem tartalmaz a feladathoz nem tartozó változást
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Easy GitHub started implementation on feature/TASK-48-uj-workspace-members-szabalytipus-a-workspace-ya.
+
+Ellenőrzés (finalizálás): `uv run ruff format -q . && task verify` exit 0 (756 passed, 1 skipped; lefedettség 99%, rules/workspace.py 100%). `uv run github-manager repos` betölti a valódi configot. `uv run github-manager check -o tyutyutyu --repo zenget-workspace` (csak olvasó): nincs workspace-members finding. A létezés-cache kulcsa kisbetűs OWNER/NAME, így eltérő írásmód egy lekérdezés.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Új `workspace_members` szabálytípus (src/github_manager/rules/workspace.py): a `path` (alapértelmezés workspace.yaml) manifest `repositories` listájának minden tagrepója létezik és olvasható. Csak MANUAL findingot ad (hiányzó/érvénytelen YAML manifest, nincs repositories lista, hiányzó name/origin, nem támogatott origin, nem létező vagy nem olvasható tagrepó); semmit nem ír. Origin: git@github.com:OWNER/NAME és https://github.com/OWNER/NAME, .git-tel vagy anélkül (szigorú fullmatch). Új csak olvasó `Workspace.repo_exists` művelet: GitHub.repo_exists (GET /repos/{repo}, az owner tokenjével; 404/401/403 → False, más hiba GitHubError), RemoteWorkspace a futásonként közös RepoFileCache-en át repónként egyszer kérdez; FakeGitHub és MemoryWorkspace bővítve. Regisztráció RULE_TYPES-ban, github-manager.toml workspace-members szabály profiles=["workspace"], README alszakasz, AGENTS.md modullista. Ellenőrzés: task verify zöld (756 passed, 1 skipped), a valódi config betölthető, a zenget-workspace élő check-je nem ad workspace-members findingot. Kockázat: App-telepítés nélküli owner tagrepója mindig 'nem olvasható' jelzést kap (szándékos, az üzenet kimondja).
+<!-- SECTION:FINAL_SUMMARY:END -->

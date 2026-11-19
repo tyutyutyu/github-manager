@@ -345,6 +345,20 @@ class GitHub:
                 return None
             raise
 
+    def repo_exists(self, repo: str) -> bool:
+        """Whether the repository (OWNER/NAME) exists and is visible to the owner's read token
+        (the same token choice as `read_default_file`). 404 and no access mean False; other
+        failures raise."""
+        owner = repo.split("/", 1)[0].lower()
+        client = self._owner_clients.get(owner, self)
+        try:
+            client.call("GET", f"/repos/{repo}")
+        except GitHubError as exc:
+            if exc.status == 404 or _is_unreadable_source(exc):
+                return False
+            raise
+        return True
+
     def _read_contents(self, repo: str, path: str, query: str) -> str | None:
         try:
             item = self.call("GET", f"/repos/{repo}/contents/{_q(path)}{query}")

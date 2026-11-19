@@ -29,6 +29,7 @@ from github_manager.rules import (
     RequiredLines,
     Rule,
     SelfHostedRunners,
+    WorkspaceMembers,
 )
 from github_manager.rules.base import Options, Workspace
 
@@ -1342,3 +1343,53 @@ def test_denied_remote_source_is_read_once_and_reported_as_manual_everywhere(fak
 
     assert fake_github.calls.count("read org/hub:s.json") == 1
     assert not any(call.startswith("commit") for call in fake_github.calls)
+
+
+def test_missing_workspace_member_is_manual_and_writes_nothing(fake_github) -> None:
+    manifest = (
+        "repositories:\n"
+        "  - name: a\n    origin: git@github.com:org/a.git\n"
+        "  - name: gone\n    origin: https://github.com/org/gone\n"
+    )
+    fake_github.add_repo("ws", {"workspace.yaml": manifest})
+    fake_github.add_repo("a", {}, owner="org")
+    rule = WorkspaceMembers.from_options({"id": "members"}, Path())
+    config = Config(owners=["owner"], rules=[rule])
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "ws"), fix=True)
+
+    assert [f.kind for f in report.findings] == [FindingKind.MANUAL]
+    assert "gone" in report.findings[0].message
+    assert not any(call.startswith(("commit", "reset", "create_pr")) for call in fake_github.calls)
+
+
+def test_workspace_member_existence_is_asked_once_per_run(fake_github) -> None:
+    manifest = "repositories:\n  - name: a\n    origin: git@github.com:org/a.git\n"
+    for name in ("ws1", "ws2"):
+        fake_github.add_repo(name, {"workspace.yaml": manifest})
+    rule = WorkspaceMembers.from_options({"id": "members"}, Path())
+    config = Config(owners=["owner"], rules=[rule])
+    cache = RepoFileCache()
+
+    for name in ("ws1", "ws2"):
+        report = process_repo(
+            fake_github, config, repo_named(fake_github, name), fix=False, repo_files=cache
+        )
+        assert [f.kind for f in report.findings] == [FindingKind.MANUAL]
+
+    assert fake_github.calls.count("exists org/a") == 1
+
+
+def test_workspace_member_existence_ignores_owner_and_name_case(fake_github) -> None:
+    manifest = (
+        "repositories:\n"
+        "  - name: a\n    origin: git@github.com:org/a.git\n"
+        "  - name: b\n    origin: git@github.com:Org/A.git\n"
+    )
+    fake_github.add_repo("ws", {"workspace.yaml": manifest})
+    rule = WorkspaceMembers.from_options({"id": "members"}, Path())
+    config = Config(owners=["owner"], rules=[rule])
+
+    process_repo(fake_github, config, repo_named(fake_github, "ws"), fix=False)
+
+    assert sum(call.startswith("exists ") for call in fake_github.calls) == 1

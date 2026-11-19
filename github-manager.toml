@@ -229,6 +229,16 @@ source = "templates/workspace/workspace-verify.yml"
 profiles = ["workspace"]
 exclude = []
 
+[[rules]]
+id = "workspace-members"
+type = "workspace_members"
+# Workspace profile only: every repository listed in workspace.yaml must exist and be
+# readable (private ones and other owners included). Read-only: a missing member is
+# reported ([manual]) and nothing is written. A member whose owner has no App
+# installation is reported too, as it cannot be checked.
+profiles = ["workspace"]
+exclude = []
+
 # Example: keep a file identical to a template stored in this repository.
 # [[rules]]
 # id = "editorconfig"
