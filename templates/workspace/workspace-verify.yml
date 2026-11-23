@@ -20,7 +20,7 @@ env:
   # renovate: datasource=pypi depName=check-jsonschema
   CHECK_JSONSCHEMA_VERSION: 0.39.0
   # renovate: datasource=npm depName=markdownlint-cli2
-  MARKDOWNLINT_CLI2_VERSION: 0.24.1
+  MARKDOWNLINT_CLI2_VERSION: 0.24.2
   # renovate: datasource=pypi depName=yamllint
   YAMLLINT_VERSION: 1.38.0
 
