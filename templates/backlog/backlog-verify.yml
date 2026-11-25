@@ -18,7 +18,7 @@ env:
   # Tool versions are pinned here; Renovate updates them in the github-manager repository
   # (custom manager in its renovate.json), the managed repositories receive the new file.
   # renovate: datasource=npm depName=backlog.md
-  BACKLOG_MD_VERSION: 1.57.1
+  BACKLOG_MD_VERSION: 1.57.2
   # renovate: datasource=npm depName=markdownlint-cli2
   MARKDOWNLINT_CLI2_VERSION: 0.24.2
   # renovate: datasource=pypi depName=yamllint
