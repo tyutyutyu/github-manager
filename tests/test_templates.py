@@ -1,6 +1,10 @@
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from github_manager.rules import RepoRuleset, SelfHostedRunners
 
@@ -61,3 +65,54 @@ def test_template_pins_actions_and_needs_no_secrets(template) -> None:
         assert comment.startswith("v"), action
     assert "secrets." not in template_text
     assert "contents: read" in template_text
+
+
+def _manifest_consistency_script() -> str:
+    source, _ = SYNCED_WORKFLOWS["workspace"]
+    workflow = yaml.safe_load(source.read_text(encoding="utf-8"))
+    step = next(
+        step
+        for step in workflow["jobs"]["verify"]["steps"]
+        if step.get("name") == "Check the manifest consistency"
+    )
+    lines = step["run"].splitlines()
+    assert lines[0] == "python - <<'PY'"
+    assert lines[-1] == "PY"
+    return "\n".join(lines[1:-1])
+
+
+def _run_manifest_check(directory: Path, backlog: str) -> subprocess.CompletedProcess[str]:
+    git = shutil.which("git")
+    assert git
+    subprocess.run([git, "init", "-q", str(directory)], check=True)  # noqa: S603 - absolute path, fixed arguments
+    (directory / ".gitignore").write_text("/core/\n/web/\n", encoding="utf-8")
+    manifest = {
+        "kind": "easy-github-workspace",
+        "backlog": backlog,
+        "repositories": [
+            {"name": "core", "origin": "git@github.com:owner/core.git"},
+            {"name": "web", "origin": "git@github.com:owner/web.git"},
+        ],
+    }
+    (directory / "workspace.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    return subprocess.run(  # noqa: S603 - the script is this repository's own template
+        [sys.executable, "-c", _manifest_consistency_script()],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("backlog", [".", "core"])
+def test_manifest_check_accepts_workspace_or_member_backlog(tmp_path: Path, backlog) -> None:
+    result = _run_manifest_check(tmp_path, backlog)
+
+    assert result.returncode == 0, result.stdout
+
+
+def test_manifest_check_rejects_unknown_backlog(tmp_path: Path) -> None:
+    result = _run_manifest_check(tmp_path, "missing")
+
+    assert result.returncode == 1
+    assert "::error::backlog 'missing' is not" in result.stdout
