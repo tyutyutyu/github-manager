@@ -48,8 +48,9 @@ jobs:
       - name: Validate workspace.yaml against the schema
         run: |
           check-jsonschema --schemafile .github/schemas/workspace.schema.json workspace.yaml
-      # `backlog` must name a member repository, member names must be unique, and the
-      # .gitignore must exclude the folder of every member (decided by git itself).
+      # `backlog` must be "." (the workspace repository itself) or name a member repository,
+      # member names must be unique, and the .gitignore must exclude the folder of every
+      # member (decided by git itself).
       - name: Check the manifest consistency
         run: |
           python - <<'PY'
@@ -64,8 +65,10 @@ jobs:
 
           names = [repository["name"] for repository in manifest["repositories"]]
           errors = []
-          if manifest["backlog"] not in names:
-              errors.append(f"backlog '{manifest['backlog']}' is not in repositories")
+          if manifest["backlog"] != "." and manifest["backlog"] not in names:
+              errors.append(
+                  f"backlog '{manifest['backlog']}' is not '.' or in repositories"
+              )
           for name, count in Counter(names).items():
               if count > 1:
                   errors.append(f"repository name '{name}' is listed {count} times")

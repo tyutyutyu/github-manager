@@ -391,7 +391,8 @@ manifest (`kind: easy-github-workspace`, `backlog`, `repositories[].name` and `o
   Its `verify` job runs on pushes to `main` and on every pull request, and fails when:
   - `workspace.yaml` does not match `.github/schemas/workspace.schema.json`
     (`check-jsonschema`);
-  - `backlog` is not one of the `repositories[].name` values, or a name is listed twice;
+  - `backlog` is neither `.` (the workspace repository itself) nor one of the
+    `repositories[].name` values, or a name is listed twice;
   - `.gitignore` does not exclude the `<name>/` folder of a member repository (decided by
     `git check-ignore`, not by text matching);
   - `yamllint` (duplicate keys, syntax errors) or `markdownlint-cli2` (broken links, undefined
