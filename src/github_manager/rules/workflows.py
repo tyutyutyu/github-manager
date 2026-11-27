@@ -45,6 +45,14 @@ class _Replacement:
     start: int
     end: int
     text: str
+    labels: list[str]
+
+
+class _Target(NamedTuple):
+    """What one job must run on: the allowed label sets and the value that replaces others."""
+
+    allowed: list[list[str]]
+    runs_on: list[str]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -52,8 +60,10 @@ class SelfHostedRunners(Rule):
     """Every job of a private or internal repository must run on an allowed self-hosted runner.
 
     `allowed_runs_on` lists the accepted label sets; a job's `runs-on` must equal one of them
-    exactly (as a set, ignoring case). A single `ubuntu-*` label and a label set that contains
-    `self-hosted` but is not allowed are rewritten to `runs_on`, when the value sits on the
+    exactly (as a set, ignoring case). `job_runs_on` overrides this per job id (exact match,
+    case sensitive): such a job must run on its own label set, which is also its replacement.
+    A single `ubuntu-*` label and a label set that contains `self-hosted` but is not allowed
+    are rewritten to the job's replacement (`runs_on` by default), when the value sits on the
     same line as its `runs-on` key (a scalar or a flow list); the rest of the file stays
     byte for byte the same. Every other job (other operating systems, unknown labels,
     expressions, matrices, mappings, external reusable workflows) and workflow files that
@@ -64,6 +74,7 @@ class SelfHostedRunners(Rule):
 
     allowed_runs_on: list[list[str]]
     runs_on: list[str]
+    job_runs_on: dict[str, list[str]]
 
     @classmethod
     def _build(cls, options: Options, base_dir: Path, **common: Any) -> Self:
@@ -72,11 +83,7 @@ class SelfHostedRunners(Rule):
             raise ValueError("'allowed_runs_on' must not be empty")
         seen: set[frozenset[str]] = set()
         for labels in allowed:
-            folded = frozenset(label.casefold() for label in labels)
-            if SELF_HOSTED not in folded:
-                raise ValueError(
-                    f"'allowed_runs_on' set {json.dumps(labels)} must contain {SELF_HOSTED!r}"
-                )
+            folded = _self_hosted_set(f"'allowed_runs_on' set {json.dumps(labels)}", labels)
             if folded in seen:
                 raise ValueError(f"duplicate 'allowed_runs_on' set: {json.dumps(labels)}")
             seen.add(folded)
@@ -87,7 +94,14 @@ class SelfHostedRunners(Rule):
             raise ValueError(
                 f"'runs_on' {json.dumps(runs_on)} must equal one of the 'allowed_runs_on' sets"
             )
-        return cls(allowed_runs_on=allowed, runs_on=runs_on, **common)
+        job_runs_on = _job_runs_on(options.table("job_runs_on", {}))
+        return cls(allowed_runs_on=allowed, runs_on=runs_on, job_runs_on=job_runs_on, **common)
+
+    def _target(self, job: str) -> _Target:
+        labels = self.job_runs_on.get(job)
+        if labels is None:
+            return _Target(self.allowed_runs_on, self.runs_on)
+        return _Target([labels], labels)
 
     def apply(self, workspace: Workspace) -> list[Finding]:
         visibility = workspace.setting("visibility")
@@ -118,13 +132,14 @@ class SelfHostedRunners(Rule):
         # Jobs that share one mapping through an alias reach the same value node.
         reached = Counter(id(_entry(job, "runs-on")[1]) for job in jobs.values())
         for name, job in jobs.items():
-            problem = self._job_problem(job)
+            target = self._target(name)
+            problem = _job_problem(job, target.allowed)
             if problem is None:
                 continue
-            if not self._rewritable(job):
+            if not _rewritable(job, target.allowed):
                 findings.append(self._manual(path, f"job {name}: {problem}"))
                 continue
-            replacement = self._replacement(name, problem, job, text)
+            replacement = _replacement(name, problem, job, text, target.runs_on)
             if replacement is None or reached[id(_entry(job, "runs-on")[1])] > 1:
                 findings.append(self._manual(path, f"job {name}: {problem}; {UNSAFE_REWRITE}"))
             else:
@@ -145,9 +160,11 @@ class SelfHostedRunners(Rule):
             )
             return findings
         workspace.write(path, new_text)
-        wanted = json.dumps(self.runs_on)
         findings.extend(
-            Finding(self.id, f"{path}: job {item.job}: {item.problem}; set runs-on to {wanted}")
+            Finding(
+                self.id,
+                f"{path}: job {item.job}: {item.problem}; set runs-on to {json.dumps(item.labels)}",
+            )
             for item in replacements
         )
         return findings
@@ -159,85 +176,117 @@ class SelfHostedRunners(Rule):
         """True when the rewritten file parses and every rewritten job is now allowed."""
         jobs = _jobs(new_text).entries
         return jobs is not None and all(
-            item.job in jobs and self._job_problem(jobs[item.job]) is None for item in replacements
+            item.job in jobs
+            and _job_problem(jobs[item.job], self._target(item.job).allowed) is None
+            for item in replacements
         )
 
-    def _rewritable(self, job: yaml.Node) -> bool:
-        """True for a single `ubuntu-*` label or a label set with `self-hosted`."""
-        labels = _strings((_mapping(job) or {}).get("runs-on"))
-        if labels is None or any("${{" in label for label in labels):
-            return False
-        folded = frozenset(label.casefold() for label in labels)
-        if folded in self._allowed_sets():
-            return False
-        return SELF_HOSTED in folded or (
-            len(folded) == 1 and fnmatchcase(next(iter(folded)), UBUNTU_PATTERN)
-        )
 
-    def _replacement(
-        self, name: str, problem: str, job: yaml.Node, text: str
-    ) -> _Replacement | None:
-        """The edit for a job's `runs-on`, or None when the value is not safe to splice."""
-        key, value = _entry(job, "runs-on")
-        if key is None or value is None:
-            return None
-        start, end = value.start_mark, value.end_mark
-        one_line = key.start_mark.line == start.line == end.line
-        scalar_or_flow = isinstance(value, yaml.ScalarNode) or (
-            isinstance(value, yaml.SequenceNode) and bool(value.flow_style)
-        )
-        # An anchor or tag belongs to the node's own span; dropping it would break aliases.
-        if not (one_line and scalar_or_flow) or text[start.index] in "&!":
-            return None
-        # A list item that is an alias starts outside the list; an anchored or tagged one
-        # starts with its `&` or `!`.
-        items = value.value if isinstance(value, yaml.SequenceNode) else []
-        if any(
-            not start.index < item.start_mark.index < end.index
-            or text[item.start_mark.index] in "&!*"
-            for item in items
+def _self_hosted_set(what: str, labels: list[str]) -> frozenset[str]:
+    """The case-folded label set; one without `self-hosted` is an error."""
+    folded = frozenset(label.casefold() for label in labels)
+    if SELF_HOSTED not in folded:
+        raise ValueError(f"{what} must contain {SELF_HOSTED!r}")
+    return folded
+
+
+def _job_runs_on(table: dict[str, Any]) -> dict[str, list[str]]:
+    """The validated `job_runs_on` table: job id to a label set that contains `self-hosted`."""
+    result = {}
+    for job, labels in table.items():
+        if not job:
+            raise ValueError("'job_runs_on' job ids must not be empty")
+        if not (
+            isinstance(labels, list)
+            and labels
+            and all(isinstance(label, str) and label for label in labels)
         ):
-            return None
-        rendered = self.runs_on[0] if len(self.runs_on) == 1 else f"[{', '.join(self.runs_on)}]"
-        return _Replacement(name, problem, start.index, end.index, rendered)
+            raise ValueError(
+                f"'job_runs_on' job {job!r} must be a non-empty list of non-empty strings"
+            )
+        _self_hosted_set(f"'job_runs_on' job {job!r} set {json.dumps(labels)}", labels)
+        result[job] = list(labels)
+    return result
 
-    def _job_problem(self, job: yaml.Node) -> str | None:
-        fields = _mapping(job)
-        if fields is None:
-            return "is not a mapping"
-        runs_on = fields.get("runs-on")
-        if runs_on is None:
-            uses = fields.get("uses")
-            if _text(uses) is None:
-                return "has neither 'runs-on' nor 'uses'"
-            if (_text(uses) or "").startswith("./"):
-                return None
-            return f"calls {json.dumps(_text(uses))} without 'runs-on' (check the runner manually)"
-        allowed = " or ".join(json.dumps(labels) for labels in self.allowed_runs_on)
-        if _text(runs_on) is not None:
-            labels = [_text(runs_on) or ""]
-        elif isinstance(runs_on, yaml.SequenceNode):
-            texts = [_text(item) for item in runs_on.value]
-            if any(text is None for text in texts):
-                return (
-                    f"runs-on {_json(runs_on)} has a list item that is not a string"
-                    f" (check manually; allowed: {allowed})"
-                )
-            labels = [text for text in texts if text is not None]
-        else:
+
+def _folded_sets(label_sets: list[list[str]]) -> set[frozenset[str]]:
+    return {frozenset(label.casefold() for label in labels) for labels in label_sets}
+
+
+def _rewritable(job: yaml.Node, allowed: list[list[str]]) -> bool:
+    """True for a single `ubuntu-*` label or a label set with `self-hosted`."""
+    labels = _strings((_mapping(job) or {}).get("runs-on"))
+    if labels is None or any("${{" in label for label in labels):
+        return False
+    folded = frozenset(label.casefold() for label in labels)
+    if folded in _folded_sets(allowed):
+        return False
+    return SELF_HOSTED in folded or (
+        len(folded) == 1 and fnmatchcase(next(iter(folded)), UBUNTU_PATTERN)
+    )
+
+
+def _replacement(
+    name: str, problem: str, job: yaml.Node, text: str, runs_on: list[str]
+) -> _Replacement | None:
+    """The edit for a job's `runs-on`, or None when the value is not safe to splice."""
+    key, value = _entry(job, "runs-on")
+    if key is None or value is None:
+        return None
+    start, end = value.start_mark, value.end_mark
+    one_line = key.start_mark.line == start.line == end.line
+    scalar_or_flow = isinstance(value, yaml.ScalarNode) or (
+        isinstance(value, yaml.SequenceNode) and bool(value.flow_style)
+    )
+    # An anchor or tag belongs to the node's own span; dropping it would break aliases.
+    if not (one_line and scalar_or_flow) or text[start.index] in "&!":
+        return None
+    # A list item that is an alias starts outside the list; an anchored or tagged one
+    # starts with its `&` or `!`.
+    items = value.value if isinstance(value, yaml.SequenceNode) else []
+    if any(
+        not start.index < item.start_mark.index < end.index or text[item.start_mark.index] in "&!*"
+        for item in items
+    ):
+        return None
+    rendered = runs_on[0] if len(runs_on) == 1 else f"[{', '.join(runs_on)}]"
+    return _Replacement(name, problem, start.index, end.index, rendered, runs_on)
+
+
+def _job_problem(job: yaml.Node, allowed_runs_on: list[list[str]]) -> str | None:
+    fields = _mapping(job)
+    if fields is None:
+        return "is not a mapping"
+    runs_on = fields.get("runs-on")
+    if runs_on is None:
+        uses = fields.get("uses")
+        if _text(uses) is None:
+            return "has neither 'runs-on' nor 'uses'"
+        if (_text(uses) or "").startswith("./"):
+            return None
+        return f"calls {json.dumps(_text(uses))} without 'runs-on' (check the runner manually)"
+    allowed = " or ".join(json.dumps(labels) for labels in allowed_runs_on)
+    if _text(runs_on) is not None:
+        labels = [_text(runs_on) or ""]
+    elif isinstance(runs_on, yaml.SequenceNode):
+        texts = [_text(item) for item in runs_on.value]
+        if any(text is None for text in texts):
             return (
-                f"runs-on {_json(runs_on)} must be a string or a list of strings"
+                f"runs-on {_json(runs_on)} has a list item that is not a string"
                 f" (check manually; allowed: {allowed})"
             )
-        actual = json.dumps(labels)
-        if any("${{" in label for label in labels):
-            return f"runs-on {actual} contains an expression (check manually; allowed: {allowed})"
-        if frozenset(label.casefold() for label in labels) in self._allowed_sets():
-            return None
-        return f"runs-on {actual} is not an allowed self-hosted runner (allowed: {allowed})"
-
-    def _allowed_sets(self) -> set[frozenset[str]]:
-        return {frozenset(label.casefold() for label in labels) for labels in self.allowed_runs_on}
+        labels = [text for text in texts if text is not None]
+    else:
+        return (
+            f"runs-on {_json(runs_on)} must be a string or a list of strings"
+            f" (check manually; allowed: {allowed})"
+        )
+    actual = json.dumps(labels)
+    if any("${{" in label for label in labels):
+        return f"runs-on {actual} contains an expression (check manually; allowed: {allowed})"
+    if frozenset(label.casefold() for label in labels) in _folded_sets(allowed_runs_on):
+        return None
+    return f"runs-on {actual} is not an allowed self-hosted runner (allowed: {allowed})"
 
 
 def _workflow_files(listed: list[str]) -> list[str]:

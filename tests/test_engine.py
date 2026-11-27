@@ -867,6 +867,37 @@ def test_self_hosted_runners_fix_opens_pull_request_with_rewritten_workflow(fake
     assert second.outcome is Outcome.PR_UP_TO_DATE
 
 
+def test_self_hosted_runners_job_runs_on_rewrites_deploy_and_verify_in_one_pull_request(
+    fake_github,
+) -> None:
+    rule = SelfHostedRunners.from_options(
+        {
+            "id": "sh",
+            "allowed_runs_on": [["self-hosted"]],
+            "runs_on": ["self-hosted"],
+            "job_runs_on": {"deploy": ["self-hosted", "zhukov"]},
+        },
+        Path(),
+    )
+    config = Config(owners=["owner"], rules=[rule])
+    path = ".github/workflows/deploy.yml"
+    workflow = (
+        "jobs:\n  verify:\n    runs-on: [self-hosted, zhukov]\n"
+        "  deploy:\n    runs-on: self-hosted\n"
+    )
+    name = fake_github.add_repo("app", {path: workflow}, settings={"visibility": "private"})
+
+    report = process_repo(fake_github, config, repo_named(fake_github, "app"), fix=True)
+    assert report.outcome is Outcome.PR_CREATED
+    assert fake_github.files_at(name, config.branch) == {
+        path: (
+            "jobs:\n  verify:\n    runs-on: self-hosted\n"
+            "  deploy:\n    runs-on: [self-hosted, zhukov]\n"
+        )
+    }
+    assert fake_github.files_at(name, "main") == {path: workflow}
+
+
 def test_self_hosted_runners_fixed_and_manual_jobs_share_one_pull_request(fake_github) -> None:
     config = Config(owners=["owner"], rules=[RUNNERS_RULE])
     path = ".github/workflows/ci.yml"

@@ -84,6 +84,11 @@ def test_visibility_owners_match_case_insensitively_and_may_be_partial() -> None
         {"allowed_runs_on": [["self-hosted"]], "runs_on": [""]},
         {"allowed_runs_on": [["self-hosted"]], "runs_on": ["ubuntu-latest"]},
         {"allowed_runs_on": [["self-hosted"]], "runs_on": ["self-hosted"], "typo": 1},
+        {
+            "allowed_runs_on": [["self-hosted"]],
+            "runs_on": ["self-hosted"],
+            "job_runs_on": {"deploy": ["zhukov"]},
+        },
     ],
 )
 def test_invalid_self_hosted_runners_options_are_config_errors(options) -> None:

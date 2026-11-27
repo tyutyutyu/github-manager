@@ -762,3 +762,105 @@ def test_self_hosted_runners_do_not_write_when_the_check_after_rewriting_fails(
     assert findings[0].kind is FindingKind.MANUAL
     assert findings[0].message.endswith("; cannot rewrite safely")
     assert workspace.files[WORKFLOW] == before
+
+
+# --- self_hosted_runners: job_runs_on ----------------------------------------
+
+ZHUKOV = ["self-hosted", "zhukov"]
+
+
+def zhukov_rule() -> SelfHostedRunners:
+    return runners_rule(job_runs_on={"deploy": ZHUKOV})
+
+
+def test_self_hosted_runners_job_runs_on_accepts_each_job_on_its_own_set(make_workspace) -> None:
+    jobs = "  verify:\n    runs-on: self-hosted\n  deploy:\n    runs-on: [Zhukov, self-hosted]\n"
+    assert zhukov_rule().apply(job_workspace(make_workspace, jobs)) == []
+
+
+@pytest.mark.parametrize(
+    ("jobs", "expected", "message"),
+    [
+        (
+            "  deploy:\n    runs-on: self-hosted\n",
+            "  deploy:\n    runs-on: [self-hosted, zhukov]\n",
+            'job deploy: runs-on ["self-hosted"] is not an allowed self-hosted runner'
+            ' (allowed: ["self-hosted", "zhukov"]); set runs-on to ["self-hosted", "zhukov"]',
+        ),
+        (
+            "  deploy:\n    runs-on: ubuntu-latest\n",
+            "  deploy:\n    runs-on: [self-hosted, zhukov]\n",
+            'job deploy: runs-on ["ubuntu-latest"] is not an allowed self-hosted runner'
+            ' (allowed: ["self-hosted", "zhukov"]); set runs-on to ["self-hosted", "zhukov"]',
+        ),
+        (
+            "  verify:\n    runs-on: [self-hosted, zhukov]\n",
+            "  verify:\n    runs-on: self-hosted\n",
+            'job verify: runs-on ["self-hosted", "zhukov"] is not an allowed self-hosted runner'
+            ' (allowed: ["self-hosted"]); set runs-on to ["self-hosted"]',
+        ),
+    ],
+)
+def test_self_hosted_runners_job_runs_on_rewrites_to_the_job_set(
+    make_workspace, jobs, expected, message
+) -> None:
+    text, findings = rewritten(make_workspace, jobs, rule=zhukov_rule())
+    assert text == f"name: ci\non: push\njobs:\n{expected}"
+    assert findings == [fixed(f"{WORKFLOW}: {message}")]
+
+
+def test_self_hosted_runners_job_runs_on_rewrites_jobs_to_different_sets_in_one_file(
+    make_workspace,
+) -> None:
+    jobs = "  verify:\n    runs-on: ubuntu-latest\n  deploy:\n    runs-on: ubuntu-latest\n"
+    text, findings = rewritten(make_workspace, jobs, rule=zhukov_rule())
+    assert text == (
+        "name: ci\non: push\njobs:\n"
+        "  verify:\n    runs-on: self-hosted\n"
+        "  deploy:\n    runs-on: [self-hosted, zhukov]\n"
+    )
+    assert [finding.kind for finding in findings] == [FindingKind.PULL_REQUEST] * 2
+
+
+def test_self_hosted_runners_job_runs_on_matches_the_job_id_case_sensitively(
+    make_workspace,
+) -> None:
+    text, findings = rewritten(
+        make_workspace, "  Deploy:\n    runs-on: [self-hosted, zhukov]\n", rule=zhukov_rule()
+    )
+    assert text == "name: ci\non: push\njobs:\n  Deploy:\n    runs-on: self-hosted\n"
+    assert findings[0].message.endswith('set runs-on to ["self-hosted"]')
+
+
+def test_self_hosted_runners_job_runs_on_reports_other_values_as_manual(make_workspace) -> None:
+    workspace = job_workspace(make_workspace, "  deploy:\n    runs-on: windows-latest\n")
+    assert zhukov_rule().apply(workspace) == [
+        manual(
+            f'{WORKFLOW}: job deploy: runs-on ["windows-latest"] is not an allowed self-hosted'
+            ' runner (allowed: ["self-hosted", "zhukov"])'
+        )
+    ]
+
+
+def test_self_hosted_runners_job_runs_on_defaults_to_empty() -> None:
+    assert runners_rule().job_runs_on == {}
+
+
+@pytest.mark.parametrize(
+    ("job_runs_on", "message"),
+    [
+        (["deploy"], "'job_runs_on' must be of type dict"),
+        ({"": ZHUKOV}, "'job_runs_on' job ids must not be empty"),
+        ({"deploy": "self-hosted"}, "'job_runs_on' job 'deploy' must be a non-empty list"),
+        ({"deploy": []}, "'job_runs_on' job 'deploy' must be a non-empty list"),
+        ({"deploy": ["self-hosted", ""]}, "'job_runs_on' job 'deploy' must be a non-empty list"),
+        ({"deploy": ["self-hosted", 1]}, "'job_runs_on' job 'deploy' must be a non-empty list"),
+        (
+            {"deploy": ["zhukov"]},
+            r"'job_runs_on' job 'deploy' set \[\"zhukov\"\] must contain 'self-hosted'",
+        ),
+    ],
+)
+def test_self_hosted_runners_reject_invalid_job_runs_on(job_runs_on, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        runners_rule(job_runs_on=job_runs_on)

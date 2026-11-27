@@ -311,7 +311,9 @@ member. A member whose owner has no App installation is always reported as not r
 **Checks:** in private and internal repositories (public ones are not checked), the
 `runs-on` of every job in `.github/workflows/*.yml|*.yaml` equals one of the label sets
 in `allowed_runs_on` (exact match as a set, case-insensitive); local `uses: ./...` calls
-are skipped.
+are skipped. A job whose id is a key of `job_runs_on` (exact match, case matters) must
+instead run on exactly that label set, e.g. a `deploy` job on `[self-hosted, zhukov]`
+while every other job stays on `[self-hosted]`.
 
 **Options:**
 
@@ -319,9 +321,10 @@ are skipped.
 | --- | --- | --- | --- | --- |
 | `allowed_runs_on` | list of lists of strings | yes | | allowed label sets, e.g. `[["self-hosted"]]`; not empty, no duplicate sets, every set must contain `self-hosted` |
 | `runs_on` | list of strings | yes | | replacement value, e.g. `["self-hosted"]`; it must equal one of the `allowed_runs_on` sets |
+| `job_runs_on` | table of job id to list of strings | no | `{}` | per-job label set that replaces `allowed_runs_on` and `runs_on` for that job, e.g. `{ deploy = ["self-hosted", "zhukov"] }`; no empty job id or label, every set must contain `self-hosted` |
 
-**Fix:** rewrites the `runs-on` of a job to `runs_on` in the pull request when it is a
-single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed
+**Fix:** rewrites the `runs-on` of a job to `runs_on` (or to its `job_runs_on` set) in the
+pull request when it is a single `ubuntu-*` label or a label set that contains `self-hosted` but is not allowed
 (e.g. `[self-hosted, Linux, X64, zhukov]`) and the value sits on the same line as the
 `runs-on` key (a scalar or a one-line list); only that value changes, the rest of the
 file stays byte for byte the same, and the file is re-parsed to check the result before
