@@ -169,6 +169,10 @@ type = "self_hosted_runners"
 allowed_runs_on = [["self-hosted"]]
 # The value that replaces them; it must equal one of the allowed_runs_on sets.
 runs_on = ["self-hosted"]
+# Per job id (exact, case matters): the job must run on exactly this label set, which is
+# also its replacement. Verify and every other job run on any org runner ([self-hosted]);
+# the deploy job builds and starts the docker compose stack, so it must run on zhukov.
+job_runs_on = { deploy = ["self-hosted", "zhukov"] }
 exclude = []
 profiles = ["common", "workspace", "backlog"]
 
